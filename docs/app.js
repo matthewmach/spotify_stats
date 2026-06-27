@@ -386,9 +386,9 @@ function setWindow(start, end, presetLabel) {
   state.window = { start, end };
   // sync chips
   document.querySelectorAll("#yearChips button").forEach((b) =>
-    b.classList.toggle("active",
+    b.classList.toggle("active", !!(
       (presetLabel === "all" && b.dataset.range === "all") ||
-      (b.dataset.year && b.dataset.year === presetLabel)));
+      (b.dataset.year && b.dataset.year === presetLabel))));
   // sync date inputs
   document.getElementById("fromDate").value = DAY_DATE[start];
   document.getElementById("toDate").value = DAY_DATE[end];
