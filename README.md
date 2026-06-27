@@ -111,13 +111,34 @@ Steps:
 
 Notes:
 
-- **Genres and cover art need the Spotify client *secret*, which must never be
-  put in a public repo** — so the hosted version is stats-only. Run `enrich.py`
-  locally if you want art/genres for your own copy.
 - `.gitignore` excludes `config.json`, `data/data.json`, and
   `data/metadata.json`, so **your personal listening data and credentials are
   never published** — visitors only ever see their own uploaded files.
-- The site reads files via `FileReader`; nothing is sent to any server.
+- The site reads files via `FileReader`; nothing is sent to any server (except
+  the optional Spotify sign-in below, which talks directly to Spotify).
+
+## Genres + cover art on the web (Spotify sign-in)
+
+The hosted site can pull genres + art **without any client secret** using
+Spotify's **PKCE** OAuth flow. After loading your files, click **"♪ Add genres &
+art"**, sign in, and it fetches metadata directly from Spotify in your browser
+(the Client ID is public — safe to ship; no secret is involved).
+
+To enable it on your deployment, in the
+[Spotify dashboard](https://developer.spotify.com/dashboard) → your app →
+**Settings → Redirect URIs**, add the page URL(s):
+
+- `https://<you>.github.io/<repo>/` (and `…/index.html`)
+- for local testing: `http://127.0.0.1:8765/web/index.html`
+  (Spotify forbids `localhost` — use the `127.0.0.1` form and open the site
+  at that address)
+
+> **Development-mode limit:** while your Spotify app is in "development mode",
+> only the **app owner** and up to **25 allowlisted users** (added under
+> Settings → User Management) can sign in. That's fine for personal use; a fully
+> public sign-in needs Spotify to grant an extended-quota request.
+
+Locally you can skip sign-in entirely and run `python enrich.py` instead.
 
 ## Files
 
@@ -130,10 +151,10 @@ Notes:
 | `run.bat` | One-click: build (if possible) + launch the server |
 | `Install Desktop Shortcut.bat` | Puts a "Spotify Stats" shortcut on your Desktop |
 | `web/` | The site — local source |
-| `web/shared-build.js` | Browser port of `build.py` (used by page + worker) |
-| `web/worker.js` | Web Worker that parses/aggregates uploads off the main thread |
+| `web/shared-build.js` | Browser port of `build.py` (chunked aggregation) |
+| `web/spotify.js` | Optional in-browser enrichment via Spotify PKCE sign-in |
 | `docs/` | Generated Pages build (commit this to publish) |
-| `config.json` | Your Spotify credentials (git-ignored) |
+| `config.json` | Your Spotify credentials, for `enrich.py` (git-ignored) |
 
 When you load files in the browser, parsing + aggregation run in a **Web
 Worker** with a live progress screen; the stats only appear once it's finished.

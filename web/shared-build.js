@@ -1,6 +1,6 @@
-/* shared-build.js — aggregation used by BOTH the main page (fallback) and the
-   Web Worker. Loaded via <script> in index.html and importScripts() in worker.js.
-   Mirrors build.py so the browser produces the same structure. */
+/* shared-build.js — browser-side aggregation (mirrors build.py). Loaded via
+   <script> in index.html. Async + chunked so a large history doesn't freeze the
+   page and progress can be reported. */
 
 var DAY_MS = 86_400_000;
 
@@ -10,27 +10,30 @@ function trackIdFromUri(uri) {
   return p.length === 3 && p[1] === "track" ? p[2] : null;
 }
 
+function _tick() { return new Promise(function (r) { setTimeout(r, 0); }); }
+
 // records -> the same object shape build.py writes to data.json.
-// onProgress(plays) is called occasionally during the scan (optional).
-function buildDataset(records, onProgress) {
-  var SEP = ""; // unlikely to appear in artist/album names
+// onProgress(done, total) is called periodically; we await between chunks so the
+// UI repaints. Returns a Promise.
+async function buildDataset(records, onProgress) {
+  var SEP = String.fromCharCode(1); // unlikely to appear in names
   var artistIdx = new Map(), artists = [];
   var albumIdx = new Map(), albums = [];
   var trackIdx = new Map(), tracks = [];
 
   function getArtist(name) {
     var i = artistIdx.get(name);
-    if (i == null) { i = artists.length; artistIdx.set(name, i); artists.push({ name: name }); }
+    if (i === undefined) { i = artists.length; artistIdx.set(name, i); artists.push({ name: name }); }
     return i;
   }
   function getAlbum(artist, album) {
     var k = artist + SEP + album, i = albumIdx.get(k);
-    if (i == null) { i = albums.length; albumIdx.set(k, i); albums.push({ name: album, artist: artist }); }
+    if (i === undefined) { i = albums.length; albumIdx.set(k, i); albums.push({ name: album, artist: artist }); }
     return i;
   }
   function getTrack(tid, name, artist, album, ai, bi) {
     var i = trackIdx.get(tid);
-    if (i == null) {
+    if (i === undefined) {
       i = tracks.length; trackIdx.set(tid, i);
       tracks.push({ id: tid.slice(0, 6) === "name::" ? null : tid, name: name, artist: artist, album: album, ai: ai, bi: bi });
     }
@@ -38,26 +41,32 @@ function buildDataset(records, onProgress) {
   }
 
   var raw = [];
-  for (var j = 0; j < records.length; j++) {
+  var N = records.length;
+  var CHUNK = 10000;
+  for (var j = 0; j < N; j++) {
     var rec = records[j];
     var name = rec.master_metadata_track_name;
-    if (!name) continue;
-    var artist = rec.master_metadata_album_artist_name || "Unknown Artist";
-    var album = rec.master_metadata_album_album_name || "Unknown Album";
-    var ms = rec.ms_played || 0;
-    var ts = rec.ts;
-    if (!ts) continue;
-    var ai = getArtist(artist), bi = getAlbum(artist, album);
-    var tid = trackIdFromUri(rec.spotify_track_uri) || ("name::" + artist + "::" + name);
-    var ti = getTrack(tid, name, artist, album, ai, bi);
-    var f = 0;
-    if (rec.skipped) f |= 1;
-    if (rec.reason_end === "trackdone") f |= 2;
-    if (rec.shuffle) f |= 4;
-    raw.push([ts, ti, ms, f, +ts.slice(11, 13)]);
-    if (onProgress && (j & 16383) === 0) onProgress(raw.length);
+    if (name) {
+      var ts = rec.ts;
+      if (ts) {
+        var artist = rec.master_metadata_album_artist_name || "Unknown Artist";
+        var album = rec.master_metadata_album_album_name || "Unknown Album";
+        var ms = rec.ms_played || 0;
+        var ai = getArtist(artist), bi = getAlbum(artist, album);
+        var tid = trackIdFromUri(rec.spotify_track_uri) || ("name::" + artist + "::" + name);
+        var ti = getTrack(tid, name, artist, album, ai, bi);
+        var f = 0;
+        if (rec.skipped) f |= 1;
+        if (rec.reason_end === "trackdone") f |= 2;
+        if (rec.shuffle) f |= 4;
+        raw.push([ts, ti, ms, f, +ts.slice(11, 13)]);
+      }
+    }
+    if ((j % CHUNK) === CHUNK - 1) { if (onProgress) onProgress(j + 1, N); await _tick(); }
   }
+  if (onProgress) onProgress(N, N);
   if (!raw.length) throw new Error("no music plays in those files");
+
   raw.sort(function (a, b) { return a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0; });
 
   var baseIso = raw[0][0].slice(0, 10);

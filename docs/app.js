@@ -2,7 +2,7 @@
    Aggregates a per-play stream on the fly for any date window. */
 
 const MS_H = 3_600_000;
-// DAY_MS, trackIdFromUri, buildDataset live in shared-build.js (also used by worker.js)
+// DAY_MS, trackIdFromUri, buildDataset (async, chunked) live in shared-build.js
 const DATAKEY = { artists: "artists", albums: "albums", songs: "tracks" };
 
 const state = {
@@ -78,8 +78,13 @@ function precompute() {
   }
 }
 
+let pendingEnrich = false;   // set when we just returned from a Spotify sign-in
+
 async function startup() {
   wireOnce();
+  // If we just came back from Spotify, exchange the code for a token first.
+  try { pendingEnrich = await spotifyHandleRedirect(); }
+  catch (e) { setTimeout(() => enrichError(e.message), 400); }
   // Local build: prefer the freshly-built data.json (Pages has none, so skip).
   if (!BUILD_PAGES) {
     try {
@@ -99,6 +104,7 @@ function showUploader(msg) {
   document.getElementById("changeFiles").hidden = true;
   document.querySelectorAll(".view").forEach((v) => (v.hidden = true));
   document.getElementById("uploader").hidden = false;
+  document.getElementById("connectSpotify").hidden = true;
   document.getElementById("processing").hidden = true;     // back to the idle prompt
   document.getElementById("dropzone").hidden = false;
   const help = document.querySelector(".up-help"); if (help) help.hidden = false;
@@ -164,6 +170,9 @@ function wireOnce() {
   });
   document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeDrawer(); });
 
+  // spotify connect / enrich
+  document.getElementById("connectSpotify").addEventListener("click", connectSpotify);
+
   // change-files + uploader
   document.getElementById("changeFiles").addEventListener("click", () => showUploader());
   const input = document.getElementById("fileInput"), dz = document.getElementById("dropzone");
@@ -191,6 +200,51 @@ function onDataReady(data) {
   AGG = null; AGG_KEY = "";
   setWindow(0, N_DAYS - 1, "all");
   setTab(state.tab || "overview");
+  updateConnectButton();
+  if (pendingEnrich) { pendingEnrich = false; runEnrichment(); }
+}
+
+/* ---------- Spotify enrichment (in-browser, via spotify.js) ---------- */
+function updateConnectButton() {
+  const btn = document.getElementById("connectSpotify");
+  btn.hidden = !DATA || !!DATA.enriched;   // only offer it when we have un-enriched data
+}
+async function connectSpotify() {
+  if (!DATA) return;
+  if (spotifyConnected()) return runEnrichment();
+  document.getElementById("connectSpotify").classList.add("busy");
+  try { await spotifyLogin(); }            // redirects away to Spotify
+  catch (e) { enrichError(e.message); }
+}
+async function runEnrichment() {
+  if (!DATA || DATA.enriched) return;
+  const bar = document.getElementById("enrichbar");
+  const txt = document.getElementById("enrichText");
+  const fill = document.getElementById("enrichBar");
+  document.getElementById("connectSpotify").classList.add("busy");
+  bar.hidden = false; txt.textContent = "Connecting to Spotify…"; fill.style.width = "2%";
+  try {
+    await spotifyEnrich(DATA, (stage, done, total) => {
+      txt.textContent = `${stage} ${done.toLocaleString()} / ${total.toLocaleString()}`;
+      fill.style.width = Math.max(2, (done / total) * 100) + "%";
+    });
+    idbSet("dataset", DATA).catch(() => {});   // persist enriched data
+    AGG = null; AGG_KEY = "";                   // rebuild rows so art/genres show
+    render();
+    updateConnectButton();
+    txt.textContent = "Done — genres & cover art added ✓"; fill.style.width = "100%";
+    setTimeout(() => { bar.hidden = true; }, 1800);
+  } catch (e) {
+    enrichError(e.message);
+  } finally {
+    document.getElementById("connectSpotify").classList.remove("busy");
+  }
+}
+function enrichError(msg) {
+  const bar = document.getElementById("enrichbar"), txt = document.getElementById("enrichText");
+  bar.hidden = false; txt.textContent = "Spotify: " + msg; document.getElementById("enrichBar").style.width = "0%";
+  document.getElementById("connectSpotify").classList.remove("busy");
+  setTimeout(() => { bar.hidden = true; }, 7000);
 }
 
 /* ---------- file loading + processing screen ---------- */
@@ -211,10 +265,6 @@ function setProc(stage, pct, sub) {
   document.getElementById("procBar").style.width = Math.max(0, Math.min(100, pct)) + "%";
   document.getElementById("procSub").textContent = sub || "";
 }
-function updateProc(m) {
-  if (m.stage === "reading") setProc("Reading your history…", 6 + (m.i / m.n) * 64, `${m.i} / ${m.n} files · ${(m.plays || 0).toLocaleString()} plays`);
-  else if (m.stage === "aggregating") setProc("Aggregating plays…", 84, `${(m.plays || 0).toLocaleString()} plays`);
-}
 function failProcessing(msg) {
   document.getElementById("processing").hidden = true;
   document.getElementById("dropzone").hidden = false;
@@ -224,58 +274,41 @@ function failProcessing(msg) {
   st.hidden = false; st.className = "up-status err"; st.textContent = msg;
 }
 
+// Read + parse + aggregate on the main thread, chunked with yields so the UI
+// stays responsive and shows progress. (A Web Worker was tried but doubled
+// memory on large exports and could hang; chunking is simpler and reliable.)
 async function handleFiles(files) {
   if (!files || !files.length) return;
   startProcessingUI();
   await raf();
-  let data;
   try {
-    data = await processFiles(files);
-  } catch (e) {
-    return failProcessing("Could not read those files: " + (e.message || e));
-  }
-  if (!data) return;                       // error already shown by processor
-  setProc("Building views…", 92, `${data.totals.plays.toLocaleString()} plays`);
-  await raf();
-  try { await idbSet("dataset", data); } catch (e) {}
-  DATA_SOURCE = "upload";
-  setProc("Done", 100, "");
-  await raf();
-  onDataReady(data);
-}
+    // 1) read + parse each file
+    const records = [];
+    for (let i = 0; i < files.length; i++) {
+      let json;
+      try { json = JSON.parse(await files[i].text()); } catch (e) { continue; }
+      if (Array.isArray(json)) for (const r of json) if (r && (r.ms_played != null || r.ts)) records.push(r);
+      setProc("Reading your history…", 4 + ((i + 1) / files.length) * 34,
+        `${i + 1} / ${files.length} files · ${records.length.toLocaleString()} plays`);
+      await raf();
+    }
+    if (!records.length)
+      return failProcessing("No streaming-history records found. Select your Streaming_History_Audio_*.json files.");
 
-// Runs aggregation in a Web Worker (UI stays responsive); falls back to the main
-// thread if workers are unavailable (e.g. file://).
-function processFiles(files) {
-  return new Promise((resolve, reject) => {
-    let worker = null, fellBack = false;
-    const fallback = () => { if (!fellBack) { fellBack = true; mainThreadProcess(files).then(resolve, reject); } };
-    try { worker = new Worker("worker.js"); } catch (e) { return fallback(); }
-    worker.onmessage = (ev) => {
-      const m = ev.data;
-      if (m.type === "progress") updateProc(m);
-      else if (m.type === "done") { worker.terminate(); resolve(m.data); }
-      else if (m.type === "error") { worker.terminate(); failProcessing(m.message); resolve(null); }
-    };
-    worker.onerror = () => { try { worker.terminate(); } catch (e) {} fallback(); };
-    worker.postMessage({ files });
-  });
-}
+    // 2) aggregate (chunked, reports progress)
+    const data = await buildDataset(records, (done, total) =>
+      setProc("Aggregating plays…", 40 + (done / total) * 52, `${done.toLocaleString()} / ${total.toLocaleString()} plays`));
 
-async function mainThreadProcess(files) {
-  const records = [];
-  for (let i = 0; i < files.length; i++) {
-    let json;
-    try { json = JSON.parse(await files[i].text()); } catch (e) { continue; }
-    if (Array.isArray(json)) for (const r of json) if (r && (r.ms_played != null || r.ts)) records.push(r);
-    updateProc({ stage: "reading", i: i + 1, n: files.length, plays: records.length });
+    // 3) show the stats immediately, then cache in the background so a slow
+    //    IndexedDB write can never keep the spinner/upload screen up.
+    setProc("Building views…", 96, `${data.totals.plays.toLocaleString()} plays`);
     await raf();
+    DATA_SOURCE = "upload";
+    onDataReady(data);
+    idbSet("dataset", data).catch(() => {});
+  } catch (e) {
+    failProcessing("Could not read those files: " + (e.message || e));
   }
-  if (!records.length) { failProcessing("No streaming-history records found. Select your Streaming_History_Audio_*.json files."); return null; }
-  updateProc({ stage: "aggregating", plays: records.length });
-  await raf();
-  try { return buildDataset(records); }
-  catch (e) { failProcessing(e.message || String(e)); return null; }
 }
 
 /* ---------- IndexedDB cache ---------- */

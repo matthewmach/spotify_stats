@@ -78,6 +78,19 @@ select:focus, .search:focus { border-color: var(--accent2); }
 }
 .chip:hover { color: var(--txt); border-color: var(--mut); }
 .chip.active { background: var(--accent); color: #04130a; border-color: var(--accent); }
+.chip-accent { background: var(--accent); color: #04130a; border-color: var(--accent); }
+.chip-accent:hover { background: #2ee06a; color: #04130a; border-color: #2ee06a; }
+.chip-accent.busy { opacity: .6; pointer-events: none; }
+
+/* Enrichment progress banner */
+.enrichbar {
+  position: sticky; top: 65px; z-index: 16;
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 22px; background: var(--bg3); border-bottom: 1px solid var(--line);
+}
+.enrichbar .enrich-text { font-size: 13px; white-space: nowrap; }
+.enrichbar .progress.slim { flex: 1; max-width: 420px; height: 6px; }
+.spinner.sm { width: 18px; height: 18px; border-width: 2px; margin: 0; }
 .rangepick { display: flex; align-items: center; gap: 8px; position: relative; }
 .rangepick label { color: var(--mut); font-size: 12px; display: flex; align-items: center; gap: 5px; }
 .rangepick input[type="date"] {

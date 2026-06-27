@@ -23,9 +23,16 @@
       <button data-tab="genres">Genres</button>
     </nav>
     <div class="controls">
+      <button id="connectSpotify" class="chip chip-accent" hidden title="Sign in to add genres &amp; cover art">♪ Add genres &amp; art</button>
       <button id="changeFiles" class="chip" hidden title="Load a different history export">⟳ Files</button>
     </div>
   </header>
+
+  <div class="enrichbar" id="enrichbar" hidden>
+    <div class="spinner sm"></div>
+    <div class="enrich-text" id="enrichText">Connecting to Spotify…</div>
+    <div class="progress slim"><div class="progress-bar" id="enrichBar"></div></div>
+  </div>
 
   <div class="filterbar" id="filterbar" hidden>
     <div class="chips" id="yearChips"></div>
@@ -124,6 +131,7 @@
   </div>
 
   <script src="shared-build.js"></script>
+  <script src="spotify.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
