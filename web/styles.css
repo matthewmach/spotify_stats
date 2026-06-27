@@ -13,6 +13,11 @@
 
 * { box-sizing: border-box; }
 
+/* The `hidden` attribute must win over component display rules (.enrichbar,
+   .uploader, .filterbar all set an explicit display, which would otherwise
+   override the browser's [hidden] { display:none }). */
+[hidden] { display: none !important; }
+
 body {
   margin: 0;
   font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
