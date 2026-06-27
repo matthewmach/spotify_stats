@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Spotify Listening Stats</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">♫</span>
+      <div>
+        <h1>Listening Stats <span class="badge" id="modeBadge" hidden></span></h1>
+        <div class="sub" id="rangeLabel">loading…</div>
+      </div>
+    </div>
+    <nav class="tabs" id="tabs">
+      <button data-tab="overview" class="active">Overview</button>
+      <button data-tab="artists">Artists</button>
+      <button data-tab="albums">Albums</button>
+      <button data-tab="songs">Songs</button>
+      <button data-tab="genres">Genres</button>
+    </nav>
+    <div class="controls">
+      <button id="changeFiles" class="chip" hidden title="Load a different history export">⟳ Files</button>
+    </div>
+  </header>
+
+  <div class="filterbar" id="filterbar" hidden>
+    <div class="chips" id="yearChips"></div>
+    <div class="rangepick">
+      <label>From <input type="date" id="fromDate"></label>
+      <label>To <input type="date" id="toDate"></label>
+      <button id="presetMenuBtn" class="chip" title="Quick ranges">Quick ▾</button>
+      <div class="presetMenu" id="presetMenu" hidden></div>
+    </div>
+    <span class="rangeNote" id="rangeNote"></span>
+  </div>
+
+  <main id="app">
+    <div class="loading" id="loading">Loading…</div>
+
+    <!-- Upload screen (GitHub Pages / no local data.json) -->
+    <section class="uploader" id="uploader" hidden>
+      <div class="up-card">
+        <div class="up-logo">♫</div>
+        <h2>Explore your Spotify listening history</h2>
+        <p class="up-lead">Drop your <b>Extended Streaming History</b> JSON files below, or browse for them.
+          Everything is processed <b>in your browser</b> — nothing is uploaded anywhere.</p>
+
+        <div class="up-warn" id="fileWarn" hidden>
+          ⚠ You opened this as a local file (<code>file://</code>), so your data <b>won't be remembered</b>
+          and you'll be asked for it every time. Launch it with <code>run.bat</code> (or
+          <code>python serve.py</code>) instead — then it loads automatically.
+        </div>
+
+        <label class="dropzone" id="dropzone">
+          <input type="file" id="fileInput" accept=".json,application/json" multiple hidden />
+          <div class="dz-inner">
+            <div class="dz-icon">⬆</div>
+            <div><b>Choose files</b> or drag them here</div>
+            <div class="muted">Select all your <code>Streaming_History_Audio_*.json</code> files</div>
+          </div>
+        </label>
+
+        <div class="processing" id="processing" hidden>
+          <div class="spinner"></div>
+          <div class="proc-stage" id="procStage">Reading your history…</div>
+          <div class="progress"><div class="progress-bar" id="procBar"></div></div>
+          <div class="proc-sub muted" id="procSub"></div>
+        </div>
+
+        <div class="up-status" id="upStatus" hidden></div>
+
+        <details class="up-help">
+          <summary>Where do I get these files?</summary>
+          <ol>
+            <li>Spotify → <b>Account → Privacy settings</b>.</li>
+            <li>Request <b>Extended streaming history</b> (arrives by email, can take a few days).</li>
+            <li>Unzip it and select every <code>Streaming_History_Audio_*.json</code> file here.</li>
+          </ol>
+          <p class="muted">Genres and cover art aren't in the export — they only appear if you run the
+            optional local <code>enrich.py</code> step (see the project README).</p>
+        </details>
+      </div>
+    </section>
+
+    <!-- Overview -->
+    <section class="view" id="view-overview" hidden></section>
+
+    <!-- Table views share a layout -->
+    <section class="view" id="view-artists" hidden>
+      <div class="tableHead">
+        <input type="search" class="search" placeholder="Search artists…" data-search="artists" />
+        <span class="count" data-count="artists"></span>
+      </div>
+      <div class="tableWrap"><table data-table="artists"></table></div>
+    </section>
+
+    <section class="view" id="view-albums" hidden>
+      <div class="tableHead">
+        <input type="search" class="search" placeholder="Search albums or artists…" data-search="albums" />
+        <span class="count" data-count="albums"></span>
+      </div>
+      <div class="tableWrap"><table data-table="albums"></table></div>
+    </section>
+
+    <section class="view" id="view-songs" hidden>
+      <div class="tableHead">
+        <input type="search" class="search" placeholder="Search songs, artists, albums…" data-search="songs" />
+        <span class="count" data-count="songs"></span>
+      </div>
+      <div class="tableWrap"><table data-table="songs"></table></div>
+    </section>
+
+    <section class="view" id="view-genres" hidden></section>
+  </main>
+
+  <!-- Detail drawer -->
+  <div class="drawer" id="drawer" hidden>
+    <div class="drawer-backdrop" data-close></div>
+    <div class="drawer-panel" id="drawerPanel"></div>
+  </div>
+
+  <script src="shared-build.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

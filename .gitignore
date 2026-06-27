@@ -1,0 +1,6 @@
+# Secrets — never commit your Spotify credentials
+config.json
+
+# Generated data
+data/data.json
+data/metadata.json
