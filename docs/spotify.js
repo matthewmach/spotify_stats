@@ -48,7 +48,6 @@ async function spotifyHandleRedirect() {
   const code = url.searchParams.get("code");
   const err = url.searchParams.get("error");
   if (code || err) {
-    // strip the oauth params from the address bar
     url.searchParams.delete("code"); url.searchParams.delete("state"); url.searchParams.delete("error");
     history.replaceState({}, "", url.pathname + (url.search ? url.search : "") + url.hash);
   }
@@ -98,14 +97,84 @@ async function spotifyGet(path) {
   }
 }
 
-/* ---- Enrichment (mirrors enrich.py) ---- */
-async function spotifyEnrich(data, onProgress) {
-  const ids = data.tracks.filter((t) => t.id).map((t) => t.id);
-  const trackInfo = new Map();
-  const artistIds = new Set();
+/* ---- Enrichment ----
+   /tracks must come first (it's the only source of artist IDs), but we go in
+   MOST-PLAYED-FIRST order and fetch each artist as soon as its ID appears, then
+   re-render progressively. So your top artists' genres + the top cover art show
+   up in the first second or two, and the long tail fills in after.
 
-  for (let i = 0; i < ids.length; i += 50) {
-    const res = await spotifyGet("/tracks?ids=" + ids.slice(i, i + 50).join(","));
+   onProgress(tracksDone, totalTracks, artistsDone, totalArtists, doRender). */
+async function spotifyEnrich(data, onProgress) {
+  const SEP = String.fromCharCode(1);
+
+  // track indices that have a Spotify id, ordered by play count (desc)
+  const counts = new Int32Array(data.tracks.length);
+  const pt = data.plays.t;
+  for (let i = 0; i < pt.length; i++) counts[pt[i]]++;
+  const order = [];
+  for (let i = 0; i < data.tracks.length; i++) if (data.tracks[i].id) order.push(i);
+  order.sort((a, b) => counts[b] - counts[a]);
+  const trackIds = order.map((i) => data.tracks[i].id);
+  const totalTracks = trackIds.length;
+
+  const trackInfo = new Map();      // track id -> {img, imgBig, artistIds, popularity, duration_ms}
+  const artistInfo = new Map();     // artist id -> {genres, img, popularity, followers}
+  const seenArtist = new Set();
+  const pendingArtists = [];        // artist ids waiting to be fetched
+  let tracksDone = 0, artistsDone = 0, totalArtists = 0, lastRender = Date.now();
+
+  function applyAll() {
+    const nameToArtist = {};
+    for (const t of data.tracks) {
+      const info = trackInfo.get(t.id);
+      if (info && info.artistIds.length && !(t.artist in nameToArtist)) nameToArtist[t.artist] = info.artistIds[0];
+    }
+    const albumArt = {};
+    for (const t of data.tracks) {
+      const info = trackInfo.get(t.id);
+      if (!info) continue;
+      t.img = info.img; t.popularity = info.popularity; t.duration_ms = info.duration_ms;
+      const k = t.artist + SEP + t.album;
+      if ((info.imgBig || info.img) && !(k in albumArt)) albumArt[k] = info.imgBig || info.img;
+    }
+    for (const a of data.artists) {
+      const info = artistInfo.get(nameToArtist[a.name]);
+      if (info) { a.genres = info.genres; a.img = info.img; a.popularity = info.popularity; a.followers = info.followers; }
+    }
+    for (const al of data.albums) {
+      const k = al.artist + SEP + al.name;
+      if (albumArt[k]) al.img = albumArt[k];
+      const info = artistInfo.get(nameToArtist[al.artist]);
+      if (info && info.genres.length) al.genres = info.genres;
+    }
+  }
+
+  function report() {
+    const now = Date.now();
+    const doRender = now - lastRender > 700;
+    if (doRender) { applyAll(); lastRender = now; }
+    onProgress(tracksDone, totalTracks, artistsDone, totalArtists, doRender);
+  }
+
+  async function flushArtists(force) {
+    while (pendingArtists.length >= 50 || (force && pendingArtists.length)) {
+      const batch = pendingArtists.splice(0, 50);
+      const res = await spotifyGet("/artists?ids=" + batch.join(","));
+      for (const ar of res.artists || []) {
+        if (!ar) continue;
+        const imgs = ar.images || [];
+        artistInfo.set(ar.id, {
+          genres: ar.genres || [], img: imgs.length ? imgs[imgs.length - 1].url : null,
+          popularity: ar.popularity, followers: (ar.followers || {}).total,
+        });
+      }
+      artistsDone += batch.length;
+      report();
+    }
+  }
+
+  for (let i = 0; i < trackIds.length; i += 50) {
+    const res = await spotifyGet("/tracks?ids=" + trackIds.slice(i, i + 50).join(","));
     for (const tr of res.tracks || []) {
       if (!tr) continue;
       const imgs = (tr.album && tr.album.images) || [];
@@ -116,50 +185,14 @@ async function spotifyEnrich(data, onProgress) {
         artistIds: arts.map((a) => a.id).filter(Boolean),
         popularity: tr.popularity, duration_ms: tr.duration_ms,
       });
-      for (const a of arts) if (a.id) artistIds.add(a.id);
+      for (const a of arts) if (a.id && !seenArtist.has(a.id)) { seenArtist.add(a.id); pendingArtists.push(a.id); totalArtists++; }
     }
-    onProgress("Fetching tracks", Math.min(i + 50, ids.length), ids.length);
+    tracksDone = Math.min(i + 50, totalTracks);
+    await flushArtists(i === 0);   // force after the first batch so top artists light up immediately
+    report();
   }
-
-  const aIds = [...artistIds];
-  const artistInfo = new Map();
-  for (let i = 0; i < aIds.length; i += 50) {
-    const res = await spotifyGet("/artists?ids=" + aIds.slice(i, i + 50).join(","));
-    for (const ar of res.artists || []) {
-      if (!ar) continue;
-      const imgs = ar.images || [];
-      artistInfo.set(ar.id, {
-        genres: ar.genres || [], img: imgs.length ? imgs[imgs.length - 1].url : null,
-        popularity: ar.popularity, followers: (ar.followers || {}).total,
-      });
-    }
-    onProgress("Fetching artists", Math.min(i + 50, aIds.length), aIds.length);
-  }
-
-  // merge — same logic as enrich.py
-  const nameToArtist = {};
-  for (const t of data.tracks) {
-    const info = trackInfo.get(t.id);
-    if (info && info.artistIds.length && !(t.artist in nameToArtist)) nameToArtist[t.artist] = info.artistIds[0];
-  }
-  for (const a of data.artists) {
-    const info = artistInfo.get(nameToArtist[a.name]);
-    if (info) { a.genres = info.genres; a.img = info.img; a.popularity = info.popularity; a.followers = info.followers; }
-  }
-  const albumArt = {};
-  for (const t of data.tracks) {
-    const info = trackInfo.get(t.id);
-    if (info) {
-      t.img = info.img; t.popularity = info.popularity; t.duration_ms = info.duration_ms;
-      const k = t.artist + "" + t.album;
-      if ((info.imgBig || info.img) && !(k in albumArt)) albumArt[k] = info.imgBig || info.img;
-    }
-  }
-  for (const al of data.albums) {
-    const k = al.artist + "" + al.name;
-    if (albumArt[k]) al.img = albumArt[k];
-    const info = artistInfo.get(nameToArtist[al.artist]);
-    if (info && info.genres.length) al.genres = info.genres;
-  }
+  await flushArtists(true);        // any remaining artists
+  applyAll();
+  onProgress(tracksDone, totalTracks, artistsDone, totalArtists, true);
   data.enriched = true;
 }

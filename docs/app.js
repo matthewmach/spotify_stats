@@ -224,12 +224,13 @@ async function runEnrichment() {
   document.getElementById("connectSpotify").classList.add("busy");
   bar.hidden = false; txt.textContent = "Connecting to Spotify…"; fill.style.width = "2%";
   try {
-    await spotifyEnrich(DATA, (stage, done, total) => {
-      txt.textContent = `${stage} ${done.toLocaleString()} / ${total.toLocaleString()}`;
-      fill.style.width = Math.max(2, (done / total) * 100) + "%";
+    await spotifyEnrich(DATA, (td, tt, ad, at, doRender) => {
+      txt.textContent = `Genres ${ad.toLocaleString()} / ${at.toLocaleString()} · cover art ${td.toLocaleString()} / ${tt.toLocaleString()}`;
+      fill.style.width = Math.max(2, (td / tt) * 100) + "%";
+      if (doRender) { AGG = null; AGG_KEY = ""; render(); }   // progressive: show art/genres as they arrive
     });
     idbSet("dataset", DATA).catch(() => {});   // persist enriched data
-    AGG = null; AGG_KEY = "";                   // rebuild rows so art/genres show
+    AGG = null; AGG_KEY = "";                   // final rebuild
     render();
     updateConnectButton();
     txt.textContent = "Done — genres & cover art added ✓"; fill.style.width = "100%";
