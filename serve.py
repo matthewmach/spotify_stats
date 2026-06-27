@@ -41,7 +41,9 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 def main():
     if not os.path.exists(os.path.join(HERE, "data", "data.json")):
         print("data/data.json not found — run 'python build.py' first.")
-    url = f"http://localhost:{PORT}/web/index.html"
+    # Use the explicit loopback IP (not 'localhost') so the URL matches a valid
+    # Spotify Redirect URI for in-browser sign-in.
+    url = f"http://127.0.0.1:{PORT}/web/index.html"
     with socketserver.TCPServer(("127.0.0.1", PORT), Handler) as httpd:
         print(f"Serving at {url}")
         print("Press Ctrl+C to stop.")
