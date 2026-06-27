@@ -14,7 +14,9 @@ Then commit ./docs and enable GitHub Pages -> Deploy from branch -> /docs.
 """
 
 import os
+import re
 import shutil
+import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 WEB = os.path.join(HERE, "web")
@@ -22,9 +24,21 @@ DOCS = os.path.join(HERE, "docs")
 
 META = '<meta name="build" content="pages">'
 
+# Local assets to cache-bust so browsers (and the Pages CDN) always fetch the
+# latest after a deploy — otherwise a stale app.js can show old behaviour.
+ASSETS = ("styles.css", "shared-build.js", "spotify.js", "app.js")
+
+
+def cache_bust(html, version):
+    for a in ASSETS:
+        html = re.sub(r'(["\'])' + re.escape(a) + r'(["\'])',
+                      r'\g<1>' + a + "?v=" + version + r'\g<2>', html)
+    return html
+
 
 def main():
     os.makedirs(DOCS, exist_ok=True)
+    version = str(int(time.time()))
     copied = []
     for name in os.listdir(WEB):
         src = os.path.join(WEB, name)
@@ -35,6 +49,7 @@ def main():
             html = open(src, encoding="utf-8").read()
             if META not in html:
                 html = html.replace("<head>", "<head>\n  " + META, 1)
+            html = cache_bust(html, version)
             with open(dst, "w", encoding="utf-8") as fh:
                 fh.write(html)
         else:
@@ -44,7 +59,7 @@ def main():
     # A .nojekyll file stops GitHub Pages from running Jekyll on the folder.
     open(os.path.join(DOCS, ".nojekyll"), "w").close()
 
-    print(f"Deployed {len(copied)} files to {DOCS}")
+    print(f"Deployed {len(copied)} files to {DOCS} (cache-bust v={version})")
     print("  " + ", ".join(sorted(copied)))
     print("Enable GitHub Pages -> Deploy from branch -> /docs.")
 
