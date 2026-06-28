@@ -5,7 +5,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Spotify Listening Stats</title>
-  <link rel="stylesheet" href="styles.css?v=1782621614" />
+  <link rel="stylesheet" href="styles.css?v=1782622180" />
 </head>
 <body>
   <header class="topbar">
@@ -102,24 +102,48 @@
       <div class="tableHead">
         <input type="search" class="search" placeholder="Search artists…" data-search="artists" />
         <span class="count" data-count="artists"></span>
+        <label class="pagectl">Show
+          <select class="pageSize">
+            <option value="50">50</option><option value="100" selected>100</option>
+            <option value="250">250</option><option value="500">500</option>
+            <option value="1000">1000</option><option value="all">All</option>
+          </select>
+        </label>
       </div>
       <div class="tableWrap"><table data-table="artists"></table></div>
+      <div class="pager" data-pager="artists"></div>
     </section>
 
     <section class="view" id="view-albums" hidden>
       <div class="tableHead">
         <input type="search" class="search" placeholder="Search albums or artists…" data-search="albums" />
         <span class="count" data-count="albums"></span>
+        <label class="pagectl">Show
+          <select class="pageSize">
+            <option value="50">50</option><option value="100" selected>100</option>
+            <option value="250">250</option><option value="500">500</option>
+            <option value="1000">1000</option><option value="all">All</option>
+          </select>
+        </label>
       </div>
       <div class="tableWrap"><table data-table="albums"></table></div>
+      <div class="pager" data-pager="albums"></div>
     </section>
 
     <section class="view" id="view-songs" hidden>
       <div class="tableHead">
         <input type="search" class="search" placeholder="Search songs, artists, albums…" data-search="songs" />
         <span class="count" data-count="songs"></span>
+        <label class="pagectl">Show
+          <select class="pageSize">
+            <option value="50">50</option><option value="100" selected>100</option>
+            <option value="250">250</option><option value="500">500</option>
+            <option value="1000">1000</option><option value="all">All</option>
+          </select>
+        </label>
       </div>
       <div class="tableWrap"><table data-table="songs"></table></div>
+      <div class="pager" data-pager="songs"></div>
     </section>
 
     <section class="view" id="view-genres" hidden></section>
@@ -133,8 +157,8 @@
     <div class="drawer-panel" id="drawerPanel"></div>
   </div>
 
-  <script src="shared-build.js?v=1782621614"></script>
-  <script src="spotify.js?v=1782621614"></script>
-  <script src="app.js?v=1782621614"></script>
+  <script src="shared-build.js?v=1782622180"></script>
+  <script src="spotify.js?v=1782622180"></script>
+  <script src="app.js?v=1782622180"></script>
 </body>
 </html>

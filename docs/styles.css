@@ -225,6 +225,22 @@ svg { display: block; width: 100%; height: auto; overflow: visible; }
 .tableHead { display: flex; align-items: center; gap: 14px; margin-bottom: 12px; }
 .tableHead .search { flex: 1; max-width: 380px; }
 .tableHead .count { color: var(--mut); font-size: 12px; }
+.tableHead .pagectl { margin-left: auto; color: var(--mut); font-size: 12px; display: flex; align-items: center; gap: 6px; }
+.tableHead .pagectl select { padding: 4px 7px; font-size: 12px; border-radius: 6px; }
+
+.pager { display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 14px; flex-wrap: wrap; }
+.pager:empty { display: none; }
+.pager button {
+  background: var(--bg2); border: 1px solid var(--line); color: var(--txt);
+  padding: 6px 12px; border-radius: 8px; cursor: pointer; font-size: 13px;
+}
+.pager button:hover:not(:disabled) { background: var(--bg3); border-color: var(--mut); }
+.pager button:disabled { opacity: .4; cursor: default; }
+.pager .pginfo { color: var(--mut); font-size: 13px; margin: 0 4px; }
+.pager .pageJump {
+  width: 56px; background: var(--bg3); color: var(--txt); border: 1px solid var(--line);
+  border-radius: 6px; padding: 4px 6px; font-size: 13px; text-align: center;
+}
 .tableWrap { background: var(--bg2); border: 1px solid var(--line); border-radius: var(--radius); overflow: auto; }
 table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
 thead th {

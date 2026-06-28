@@ -10,6 +10,8 @@ const state = {
   window: null,                 // {start, end} inclusive day indices
   sort: { artists: { key: "plays", dir: -1 }, albums: { key: "plays", dir: -1 }, songs: { key: "plays", dir: -1 } },
   search: { artists: "", albums: "", songs: "" },
+  page: { artists: 0, albums: 0, songs: 0 },
+  pageSize: 100,                // number, or "all"
   tzOffset: -Math.round(new Date().getTimezoneOffset() / 60),  // hours to add to UTC (auto: local)
 };
 const TZ_LIST = Array.from({ length: 27 }, (_, i) => i - 12);   // UTC-12 … UTC+14
@@ -29,7 +31,6 @@ let DAY_MONTH, DAY_WEEKDAY, DAY_DATE, ARTIST_FIRST;
 let BASE_MS, N_DAYS;
 let AGG = null, AGG_KEY = "";
 const lastRendered = {};        // tab -> sorted row array currently shown
-const ROW_LIMIT = 400;
 
 /* ---------- formatting ---------- */
 const nf = new Intl.NumberFormat("en-US");
@@ -137,8 +138,38 @@ function wireOnce() {
   document.querySelectorAll("input[data-search]").forEach((inp) => {
     inp.addEventListener("input", () => {
       state.search[inp.dataset.search] = inp.value.toLowerCase().trim();
+      state.page[inp.dataset.search] = 0;
       renderTable(inp.dataset.search);
     });
+  });
+
+  // page size + pager (delegated; controls live inside the table views)
+  document.addEventListener("change", (e) => {
+    if (e.target.classList.contains("pageSize")) {
+      state.pageSize = e.target.value === "all" ? "all" : +e.target.value;
+      for (const k in state.page) state.page[k] = 0;
+      renderTable(state.tab);
+    } else if (e.target.classList.contains("pageJump")) {
+      const tab = e.target.closest("[data-pager]").dataset.pager;
+      state.page[tab] = (+e.target.value || 1) - 1;
+      renderTable(tab);
+    }
+  });
+  document.addEventListener("click", (e) => {
+    const b = e.target.closest("[data-pg]");
+    if (!b) return;
+    const tab = b.closest("[data-pager]").dataset.pager;
+    const total = (lastRendered[tab] || []).length;
+    const ps = state.pageSize === "all" ? Math.max(1, total) : state.pageSize;
+    const pages = Math.max(1, Math.ceil(total / ps));
+    let p = state.page[tab] || 0;
+    const act = b.dataset.pg;
+    if (act === "first") p = 0;
+    else if (act === "prev") p--;
+    else if (act === "next") p++;
+    else if (act === "last") p = pages - 1;
+    state.page[tab] = Math.max(0, Math.min(pages - 1, p));
+    renderTable(tab);
   });
   document.querySelectorAll("table[data-table]").forEach((tbl) => {
     tbl.addEventListener("click", (e) => {
@@ -427,6 +458,7 @@ function setWindow(start, end, presetLabel) {
   // sync date inputs
   document.getElementById("fromDate").value = DAY_DATE[start];
   document.getElementById("toDate").value = DAY_DATE[end];
+  for (const k in state.page) state.page[k] = 0;   // new data → back to page 1
   AGG = null;                  // force recompute
   render();
 }
@@ -622,6 +654,7 @@ function onSort(tab, key) {
   const s = state.sort[tab];
   if (s.key === key) s.dir *= -1;
   else { s.key = key; s.dir = key === "name" ? 1 : -1; }
+  state.page[tab] = 0;
   renderTable(tab);
 }
 function renderTable(tab) {
@@ -648,17 +681,24 @@ function renderTable(tab) {
   });
   const sorted = decorated.map((o) => o.r);
   lastRendered[tab] = sorted;
+  const total = sorted.length;
+  const maxPlays = sorted.reduce((m, r) => (r.plays > m ? r.plays : m), 1);
 
-  const shown = sorted.slice(0, ROW_LIMIT);
-  const maxPlays = shown.length ? Math.max(...shown.map((r) => r.plays)) : 1;
+  // pagination
+  const ps = state.pageSize === "all" ? Math.max(1, total) : state.pageSize;
+  const pages = Math.max(1, Math.ceil(total / ps));
+  const page = Math.max(0, Math.min(state.page[tab] || 0, pages - 1));
+  state.page[tab] = page;
+  const start = page * ps;
+  const shown = sorted.slice(start, start + ps);
 
   const thead = `<thead><tr>${cols.map((c) => {
     const on = c.key === sort.key;
     return `<th data-key="${c.key}" class="${c.txt ? "txtcol" : ""} ${on ? "sorted" : ""}">${c.label} ${on ? `<span class="arrow">${sort.dir < 0 ? "▼" : "▲"}</span>` : ""}</th>`;
   }).join("")}</tr></thead>`;
 
-  const tbody = `<tbody>${shown.map((r, i) => `<tr data-pos="${i}">${cols.map((c) => {
-    if (c.rank) return `<td class="txtcol rankcell">${i + 1}</td>`;
+  const tbody = `<tbody>${shown.map((r, i) => `<tr data-pos="${start + i}">${cols.map((c) => {
+    if (c.rank) return `<td class="txtcol rankcell">${fmtInt(start + i + 1)}</td>`;
     if (c.main) {
       const img = r.img ? `<img class="thumb ${tab === "artists" ? "round" : ""}" loading="lazy" src="${r.img}">` : "";
       const t2 = tab === "songs" ? `<div class="t2">${esc(r.artist)} · ${esc(r.album)}</div>`
@@ -675,7 +715,22 @@ function renderTable(tab) {
   }).join("")}</tr>`).join("")}</tbody>`;
 
   tbl.innerHTML = thead + tbody;
-  document.querySelector(`[data-count="${tab}"]`).textContent = `showing ${fmtInt(shown.length)} of ${fmtInt(sorted.length)}`;
+  document.querySelector(`[data-count="${tab}"]`).textContent =
+    total ? `${fmtInt(start + 1)}–${fmtInt(start + shown.length)} of ${fmtInt(total)}` : "no matches";
+
+  // sync the page-size selector + render the pager
+  const view = document.getElementById("view-" + tab);
+  const sizeSel = view.querySelector(".pageSize");
+  if (sizeSel) sizeSel.value = String(state.pageSize);
+  const pager = view.querySelector(`[data-pager="${tab}"]`);
+  if (pager) {
+    pager.innerHTML = pages <= 1 ? "" : `
+      <button data-pg="first" ${page === 0 ? "disabled" : ""}>« First</button>
+      <button data-pg="prev" ${page === 0 ? "disabled" : ""}>‹ Prev</button>
+      <span class="pginfo">Page <input type="number" class="pageJump" min="1" max="${pages}" value="${page + 1}"> of ${fmtInt(pages)}</span>
+      <button data-pg="next" ${page >= pages - 1 ? "disabled" : ""}>Next ›</button>
+      <button data-pg="last" ${page >= pages - 1 ? "disabled" : ""}>Last »</button>`;
+  }
 }
 
 /* ---------- genres ---------- */
