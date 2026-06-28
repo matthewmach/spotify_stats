@@ -10,7 +10,10 @@ const state = {
   window: null,                 // {start, end} inclusive day indices
   sort: { artists: { key: "plays", dir: -1 }, albums: { key: "plays", dir: -1 }, songs: { key: "plays", dir: -1 } },
   search: { artists: "", albums: "", songs: "" },
+  tzOffset: -Math.round(new Date().getTimezoneOffset() / 60),  // hours to add to UTC (auto: local)
 };
+const TZ_LIST = Array.from({ length: 27 }, (_, i) => i - 12);   // UTC-12 … UTC+14
+const tzLabel = (o) => (o === 0 ? "UTC" : "UTC" + (o > 0 ? "+" : "") + o);
 
 let DATA, P, NP, AI, BI;        // raw + precomputed
 let DAY_MONTH, DAY_WEEKDAY, DAY_DATE, ARTIST_FIRST;
@@ -173,9 +176,9 @@ function wireOnce() {
   // chart hover tooltips (delegated; data-tip lives on .hoverband rects)
   const tip = document.getElementById("chartTip");
   document.addEventListener("mousemove", (e) => {
-    const el = e.target.closest ? e.target.closest("[data-tip]") : null;
+    const el = e.target.closest ? e.target.closest("[data-tl]") : null;
     if (el) {
-      tip.textContent = el.getAttribute("data-tip");
+      tip.innerHTML = `<span class="tl">${esc(el.getAttribute("data-tl"))}</span> <b>${esc(el.getAttribute("data-tv"))}</b>`;
       tip.hidden = false;
       const r = tip.getBoundingClientRect();
       let x = e.clientX + 14, y = e.clientY + 14;
@@ -185,6 +188,11 @@ function wireOnce() {
     } else if (!tip.hidden) {
       tip.hidden = true;
     }
+  });
+
+  // listening-clock time zone (delegated; #tzSelect is re-rendered each time)
+  document.getElementById("view-overview").addEventListener("change", (e) => {
+    if (e.target.id === "tzSelect") { state.tzOffset = +e.target.value; renderOverview(); }
   });
 
   // spotify connect / enrich
@@ -539,13 +547,16 @@ function renderOverview() {
   const months = Object.keys(a.monthly).sort();
   const monthHours = months.map((m) => a.monthly[m].ms / MS_H);
   const newA = months.map((m) => a.discovery[m] || 0);
+  // shift UTC hour buckets into the selected time zone
+  const clockHours = new Array(24).fill(0);
+  for (let h = 0; h < 24; h++) clockHours[((h + state.tzOffset) % 24 + 24) % 24] += a.byHour[h];
 
   el.innerHTML = `
     <div class="cards">
       ${cards.map((c) => `<div class="card"><div class="val">${c[1]}</div><div class="lbl">${c[0]}</div><div class="sub2">${c[2]}</div></div>`).join("")}
     </div>
     <div class="grid-full">
-      <div class="panel"><h3>Listening over time</h3><div class="hint">Hours per month</div>${lineChart(months, monthHours, { w: 1180, tip: (l, v) => `${l}: ${fmtInt(v)} h` })}</div>
+      <div class="panel"><h3>Listening over time</h3><div class="hint">Hours per month</div>${lineChart(months, monthHours, { w: 1180, fmtVal: (v) => fmtInt(v) + " h" })}</div>
     </div>
     <div class="grid2">
       <div class="panel"><h3>Top artists</h3><div class="hint">by plays in range</div>${topList(a.artists, "artist")}</div>
@@ -559,7 +570,12 @@ function renderOverview() {
       <div class="panel"><h3>New artists discovered</h3><div class="hint">First time you heard each artist, per month</div>${barChart(months, newA, { w: 1180, every: Math.max(1, Math.ceil(months.length / 12)) })}</div>
     </div>
     <div class="grid2">
-      <div class="panel"><h3>Listening clock</h3><div class="hint">Plays by hour of day (UTC)</div>${barChart(HOURS, a.byHour, { every: 3, suffix: "h" })}</div>
+      <div class="panel">
+        <div class="panelhead"><h3>Listening clock</h3>
+          <select id="tzSelect" class="mini" title="Time zone">${TZ_LIST.map((o) => `<option value="${o}"${o === state.tzOffset ? " selected" : ""}>${tzLabel(o)}</option>`).join("")}</select>
+        </div>
+        <div class="hint">Plays by hour of day · ${tzLabel(state.tzOffset)}</div>${barChart(HOURS, clockHours, { every: 3, suffix: "h" })}
+      </div>
       <div class="panel"><h3>By weekday</h3><div class="hint">Plays per day of week</div>${barChart(WEEKDAYS, a.byWeekday, {})}</div>
     </div>`;
 }
@@ -736,12 +752,12 @@ const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 function barChart(labels, values, opts) {
   const W = opts.w || 600, H = 220, padB = 28, padL = 36, padT = 10;
   const n = values.length || 1, max = Math.max(1, ...values), bw = (W - padL) / n, every = opts.every || 1;
-  const tip = opts.tip || ((l, v) => `${l}: ${fmtInt(v)}`);
+  const fmtVal = opts.fmtVal || ((v) => fmtInt(v));
   let bars = "", bands = "";
   values.forEach((v, i) => {
     const h = ((H - padB - padT) * v) / max, x = padL + i * bw, y = H - padB - h;
     bars += `<rect class="bar" x="${x + bw * 0.12}" y="${y}" width="${bw * 0.76}" height="${h}"/>`;
-    bands += `<rect class="hoverband" x="${x}" y="${padT}" width="${bw}" height="${H - padB - padT}" data-tip="${esc(tip(labels[i], v))}"/>`;
+    bands += `<rect class="hoverband" x="${x}" y="${padT}" width="${bw}" height="${H - padB - padT}" data-tl="${esc(String(labels[i]))}" data-tv="${esc(fmtVal(v))}"/>`;
   });
   const xl = labels.map((l, i) => i % every === 0 ? `<text class="axislbl" x="${padL + i * bw + bw / 2}" y="${H - 10}" text-anchor="middle">${esc(String(l))}${opts.suffix || ""}</text>` : "").join("");
   return `<svg viewBox="0 0 ${W} ${H}">${yAxis(max, padL, padT, H - padB, W)}${bars}${bands}${xl}</svg>`;
@@ -751,14 +767,14 @@ function lineChart(labels, values, opts = {}) {
   if (!n) return `<div class="empty">No data.</div>`;
   const max = Math.max(1, ...values), stepX = n > 1 ? (W - padL) / (n - 1) : 0;
   const px = (i) => padL + i * stepX, py = (v) => H - padB - ((H - padB - padT) * v) / max;
-  const tip = opts.tip || ((l, v) => `${l}: ${fmtInt(v)}`);
+  const fmtVal = opts.fmtVal || ((v) => fmtInt(v));
   const pts = values.map((v, i) => `${px(i)},${py(v)}`).join(" ");
   const area = `${padL},${H - padB} ${pts} ${px(n - 1)},${H - padB}`;
   const every = Math.max(1, Math.ceil(n / 12));
   const xl = labels.map((l, i) => i % every === 0 ? `<text class="axislbl" x="${px(i)}" y="${H - 10}" text-anchor="middle">${esc(String(l))}</text>` : "").join("");
   const dots = values.map((v, i) => `<circle class="dot" cx="${px(i)}" cy="${py(v)}" r="2"/>`).join("");
   const bw = n > 1 ? stepX : (W - padL);
-  const bands = values.map((v, i) => `<rect class="hoverband" x="${px(i) - bw / 2}" y="${padT}" width="${bw}" height="${H - padB - padT}" data-tip="${esc(tip(labels[i], v))}"/>`).join("");
+  const bands = values.map((v, i) => `<rect class="hoverband" x="${px(i) - bw / 2}" y="${padT}" width="${bw}" height="${H - padB - padT}" data-tl="${esc(String(labels[i]))}" data-tv="${esc(fmtVal(v))}"/>`).join("");
   return `<svg viewBox="0 0 ${W} ${H}">${yAxis(max, padL, padT, H - padB, W)}<polygon class="linearea" points="${area}"/><polyline class="linepath" points="${pts}"/>${dots}${bands}${xl}</svg>`;
 }
 function hbarChart(labels, values, fmt) {
@@ -768,7 +784,7 @@ function hbarChart(labels, values, fmt) {
     return `<text class="axislbl" x="${padL - 8}" y="${y + 13}" text-anchor="end" style="font-size:11px">${esc(l)}</text>
       <rect class="bar2" x="${padL}" y="${y}" width="${w}" height="${rowH - 8}" rx="3"/>
       <text class="axislbl" x="${padL + w + 6}" y="${y + 13}">${fmt(values[i])}</text>
-      <rect class="hoverband" x="0" y="${i * rowH}" width="${W}" height="${rowH}" data-tip="${esc(l + ": " + fmt(values[i]))}"/>`;
+      <rect class="hoverband" x="0" y="${i * rowH}" width="${W}" height="${rowH}" data-tl="${esc(l)}" data-tv="${esc(fmt(values[i]))}"/>`;
   }).join("");
   return `<svg viewBox="0 0 ${W} ${H}">${rows}</svg>`;
 }

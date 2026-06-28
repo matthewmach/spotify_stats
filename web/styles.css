@@ -186,6 +186,8 @@ main { padding: 22px; max-width: 1280px; margin: 0 auto; }
   padding: 6px 10px; font-size: 12px; color: var(--txt); white-space: nowrap;
   box-shadow: 0 6px 20px rgba(0, 0, 0, .5);
 }
+.charttip .tl { color: var(--mut); }
+.charttip b { color: var(--txt); font-variant-numeric: tabular-nums; }
 
 .panel {
   background: var(--bg2); border: 1px solid var(--line); border-radius: var(--radius);
@@ -193,6 +195,9 @@ main { padding: 22px; max-width: 1280px; margin: 0 auto; }
   min-width: 0;   /* allow grid/flex items to shrink so long content truncates */
 }
 .panel h3 { margin: 0 0 4px; font-size: 14px; }
+.panelhead { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 4px; }
+.panelhead h3 { margin: 0; }
+select.mini { padding: 3px 7px; font-size: 12px; border-radius: 6px; }
 .panel .hint { color: var(--mut); font-size: 12px; margin-bottom: 12px; }
 svg { display: block; width: 100%; height: auto; overflow: visible; }
 .bar { fill: var(--accent); }
