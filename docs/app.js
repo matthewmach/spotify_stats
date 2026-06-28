@@ -574,6 +574,13 @@ function render() {
 }
 
 /* ---------- overview ---------- */
+function popDesc(p) {
+  if (p >= 70) return "very mainstream";
+  if (p >= 55) return "mainstream";
+  if (p >= 40) return "balanced";
+  if (p >= 25) return "fairly niche";
+  return "deep cuts";
+}
 function renderOverview() {
   const a = ensureAgg(), t = a.totals, el = document.getElementById("view-overview");
   const hours = t.ms / MS_H;
@@ -585,6 +592,16 @@ function renderOverview() {
     ["Tracks", fmtInt(t.tracks), `${fmtPct(t.skipped / t.plays)} skipped`],
     ["Avg play", minPer(t.ms, t.plays).toFixed(1) + "m", `${fmtPct(t.completed / t.plays)} completed`],
   ];
+  // Taste popularity: play-weighted average Spotify track popularity (0–100),
+  // i.e. sum(popularity × plays) / sum(plays) over enriched tracks.
+  if (DATA.enriched) {
+    let popSum = 0, popW = 0;
+    for (const tr of a.tracks) if (tr.popularity != null) { popSum += tr.popularity * tr.plays; popW += tr.plays; }
+    if (popW) {
+      const score = popSum / popW;
+      cards.push(["Taste popularity", Math.round(score) + "/100", `${popDesc(score)} · play-weighted`]);
+    }
+  }
   const months = Object.keys(a.monthly).sort();
   const monthHours = months.map((m) => a.monthly[m].ms / MS_H);
   const newA = months.map((m) => a.discovery[m] || 0);
