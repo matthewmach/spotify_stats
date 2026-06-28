@@ -14,6 +14,15 @@ const state = {
 };
 const TZ_LIST = Array.from({ length: 27 }, (_, i) => i - 12);   // UTC-12 … UTC+14
 const tzLabel = (o) => (o === 0 ? "UTC" : "UTC" + (o > 0 ? "+" : "") + o);
+// Common abbreviations per offset. Many show both standard + daylight names
+// because the same offset means different zones depending on the time of year.
+const TZ_NAMES = {
+  "-10": "HST", "-9": "AKST", "-8": "PST / AKDT", "-7": "MST / PDT",
+  "-6": "CST / MDT", "-5": "EST / CDT", "-4": "EDT / AST", "-3": "BRT / ADT",
+  "0": "GMT", "1": "CET / BST", "2": "EET / CEST", "3": "MSK / EEST",
+  "4": "GST", "5": "PKT", "7": "ICT", "8": "CST·CN / AWST", "9": "JST / KST",
+  "10": "AEST", "11": "AEDT", "12": "NZST", "13": "NZDT",
+};
 
 let DATA, P, NP, AI, BI;        // raw + precomputed
 let DAY_MONTH, DAY_WEEKDAY, DAY_DATE, ARTIST_FIRST;
@@ -572,7 +581,7 @@ function renderOverview() {
     <div class="grid2">
       <div class="panel">
         <div class="panelhead"><h3>Listening clock</h3>
-          <select id="tzSelect" class="mini" title="Time zone">${TZ_LIST.map((o) => `<option value="${o}"${o === state.tzOffset ? " selected" : ""}>${tzLabel(o)}</option>`).join("")}</select>
+          <select id="tzSelect" class="mini" title="Time zone">${TZ_LIST.map((o) => `<option value="${o}"${o === state.tzOffset ? " selected" : ""}>${tzLabel(o)}${TZ_NAMES[o] ? " · " + TZ_NAMES[o] : ""}</option>`).join("")}</select>
         </div>
         <div class="hint">Plays by hour of day · ${tzLabel(state.tzOffset)}</div>${barChart(HOURS, clockHours, { every: 3, suffix: "h" })}
       </div>
