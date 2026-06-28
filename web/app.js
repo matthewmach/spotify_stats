@@ -170,6 +170,23 @@ function wireOnce() {
   });
   document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeDrawer(); });
 
+  // chart hover tooltips (delegated; data-tip lives on .hoverband rects)
+  const tip = document.getElementById("chartTip");
+  document.addEventListener("mousemove", (e) => {
+    const el = e.target.closest ? e.target.closest("[data-tip]") : null;
+    if (el) {
+      tip.textContent = el.getAttribute("data-tip");
+      tip.hidden = false;
+      const r = tip.getBoundingClientRect();
+      let x = e.clientX + 14, y = e.clientY + 14;
+      if (x + r.width > window.innerWidth) x = e.clientX - r.width - 14;
+      if (y + r.height > window.innerHeight) y = e.clientY - r.height - 14;
+      tip.style.left = x + "px"; tip.style.top = y + "px";
+    } else if (!tip.hidden) {
+      tip.hidden = true;
+    }
+  });
+
   // spotify connect / enrich
   document.getElementById("connectSpotify").addEventListener("click", connectSpotify);
 
@@ -527,21 +544,23 @@ function renderOverview() {
     <div class="cards">
       ${cards.map((c) => `<div class="card"><div class="val">${c[1]}</div><div class="lbl">${c[0]}</div><div class="sub2">${c[2]}</div></div>`).join("")}
     </div>
-    <div class="grid3">
-      <div class="panel"><h3>Listening over time</h3><div class="hint">Hours per month</div>${lineChart(months, monthHours)}</div>
-      <div class="panel"><h3>Top artists</h3><div class="hint">by plays in range</div>${topList(a.artists, "artist")}</div>
+    <div class="grid-full">
+      <div class="panel"><h3>Listening over time</h3><div class="hint">Hours per month</div>${lineChart(months, monthHours, { w: 1180, tip: (l, v) => `${l}: ${fmtInt(v)} h` })}</div>
     </div>
     <div class="grid2">
-      <div class="panel"><h3>Listening clock</h3><div class="hint">Plays by hour of day (UTC)</div>${barChart(HOURS, a.byHour, { every: 3, suffix: "h" })}</div>
-      <div class="panel"><h3>By weekday</h3><div class="hint">Plays per day of week</div>${barChart(WEEKDAYS, a.byWeekday, {})}</div>
-    </div>
-    <div class="grid3">
-      <div class="panel"><h3>New artists discovered</h3><div class="hint">First time you heard each artist, per month</div>${barChart(months, newA, { every: Math.max(1, Math.ceil(months.length / 12)) })}</div>
+      <div class="panel"><h3>Top artists</h3><div class="hint">by plays in range</div>${topList(a.artists, "artist")}</div>
       <div class="panel"><h3>Top tracks</h3><div class="hint">by plays in range</div>${topList(a.tracks, "track")}</div>
     </div>
     <div class="grid2">
       <div class="panel"><h3>Top albums</h3><div class="hint">by plays in range</div>${topList(a.albums, "album")}</div>
       <div class="panel"><h3>Let it finish</h3><div class="hint">Tracks you completed most often</div>${topList([...a.tracks].sort((x, y) => y.completed - x.completed), "track", (r) => fmtInt(r.completed) + " ✓")}</div>
+    </div>
+    <div class="grid-full">
+      <div class="panel"><h3>New artists discovered</h3><div class="hint">First time you heard each artist, per month</div>${barChart(months, newA, { w: 1180, every: Math.max(1, Math.ceil(months.length / 12)) })}</div>
+    </div>
+    <div class="grid2">
+      <div class="panel"><h3>Listening clock</h3><div class="hint">Plays by hour of day (UTC)</div>${barChart(HOURS, a.byHour, { every: 3, suffix: "h" })}</div>
+      <div class="panel"><h3>By weekday</h3><div class="hint">Plays per day of week</div>${barChart(WEEKDAYS, a.byWeekday, {})}</div>
     </div>`;
 }
 
@@ -712,27 +731,35 @@ function closeDrawer() { document.getElementById("drawer").hidden = true; }
 const HOURS = Array.from({ length: 24 }, (_, i) => i);
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
+// Charts emit transparent "hoverband" rects (one per data point) carrying a
+// data-tip; a single delegated handler shows an instant styled tooltip.
 function barChart(labels, values, opts) {
-  const W = 600, H = 220, padB = 28, padL = 36, padT = 10;
+  const W = opts.w || 600, H = 220, padB = 28, padL = 36, padT = 10;
   const n = values.length || 1, max = Math.max(1, ...values), bw = (W - padL) / n, every = opts.every || 1;
-  const bars = values.map((v, i) => {
+  const tip = opts.tip || ((l, v) => `${l}: ${fmtInt(v)}`);
+  let bars = "", bands = "";
+  values.forEach((v, i) => {
     const h = ((H - padB - padT) * v) / max, x = padL + i * bw, y = H - padB - h;
-    return `<rect class="bar" x="${x + bw * 0.12}" y="${y}" width="${bw * 0.76}" height="${h}"><title>${labels[i]}: ${fmtInt(v)}</title></rect>`;
-  }).join("");
-  const xl = labels.map((l, i) => i % every === 0 ? `<text class="axislbl" x="${padL + i * bw + bw / 2}" y="${H - 10}" text-anchor="middle">${l}${opts.suffix || ""}</text>` : "").join("");
-  return `<svg viewBox="0 0 ${W} ${H}">${yAxis(max, padL, padT, H - padB)}${bars}${xl}</svg>`;
+    bars += `<rect class="bar" x="${x + bw * 0.12}" y="${y}" width="${bw * 0.76}" height="${h}"/>`;
+    bands += `<rect class="hoverband" x="${x}" y="${padT}" width="${bw}" height="${H - padB - padT}" data-tip="${esc(tip(labels[i], v))}"/>`;
+  });
+  const xl = labels.map((l, i) => i % every === 0 ? `<text class="axislbl" x="${padL + i * bw + bw / 2}" y="${H - 10}" text-anchor="middle">${esc(String(l))}${opts.suffix || ""}</text>` : "").join("");
+  return `<svg viewBox="0 0 ${W} ${H}">${yAxis(max, padL, padT, H - padB, W)}${bars}${bands}${xl}</svg>`;
 }
-function lineChart(labels, values) {
-  const W = 600, H = 220, padB = 28, padL = 40, padT = 10, n = values.length;
+function lineChart(labels, values, opts = {}) {
+  const W = opts.w || 600, H = 220, padB = 28, padL = 40, padT = 10, n = values.length;
   if (!n) return `<div class="empty">No data.</div>`;
   const max = Math.max(1, ...values), stepX = n > 1 ? (W - padL) / (n - 1) : 0;
   const px = (i) => padL + i * stepX, py = (v) => H - padB - ((H - padB - padT) * v) / max;
+  const tip = opts.tip || ((l, v) => `${l}: ${fmtInt(v)}`);
   const pts = values.map((v, i) => `${px(i)},${py(v)}`).join(" ");
   const area = `${padL},${H - padB} ${pts} ${px(n - 1)},${H - padB}`;
-  const every = Math.max(1, Math.ceil(n / 10));
-  const xl = labels.map((l, i) => i % every === 0 ? `<text class="axislbl" x="${px(i)}" y="${H - 10}" text-anchor="middle">${l}</text>` : "").join("");
-  const dots = values.map((v, i) => `<circle class="dot" cx="${px(i)}" cy="${py(v)}" r="2"><title>${labels[i]}: ${fmtInt(v)}</title></circle>`).join("");
-  return `<svg viewBox="0 0 ${W} ${H}">${yAxis(max, padL, padT, H - padB)}<polygon class="linearea" points="${area}"/><polyline class="linepath" points="${pts}"/>${dots}${xl}</svg>`;
+  const every = Math.max(1, Math.ceil(n / 12));
+  const xl = labels.map((l, i) => i % every === 0 ? `<text class="axislbl" x="${px(i)}" y="${H - 10}" text-anchor="middle">${esc(String(l))}</text>` : "").join("");
+  const dots = values.map((v, i) => `<circle class="dot" cx="${px(i)}" cy="${py(v)}" r="2"/>`).join("");
+  const bw = n > 1 ? stepX : (W - padL);
+  const bands = values.map((v, i) => `<rect class="hoverband" x="${px(i) - bw / 2}" y="${padT}" width="${bw}" height="${H - padB - padT}" data-tip="${esc(tip(labels[i], v))}"/>`).join("");
+  return `<svg viewBox="0 0 ${W} ${H}">${yAxis(max, padL, padT, H - padB, W)}<polygon class="linearea" points="${area}"/><polyline class="linepath" points="${pts}"/>${dots}${bands}${xl}</svg>`;
 }
 function hbarChart(labels, values, fmt) {
   const rowH = 26, padL = 150, W = 600, H = labels.length * rowH + 10, max = Math.max(1, ...values);
@@ -740,15 +767,16 @@ function hbarChart(labels, values, fmt) {
     const w = ((W - padL - 60) * values[i]) / max, y = i * rowH + 6;
     return `<text class="axislbl" x="${padL - 8}" y="${y + 13}" text-anchor="end" style="font-size:11px">${esc(l)}</text>
       <rect class="bar2" x="${padL}" y="${y}" width="${w}" height="${rowH - 8}" rx="3"/>
-      <text class="axislbl" x="${padL + w + 6}" y="${y + 13}">${fmt(values[i])}</text>`;
+      <text class="axislbl" x="${padL + w + 6}" y="${y + 13}">${fmt(values[i])}</text>
+      <rect class="hoverband" x="0" y="${i * rowH}" width="${W}" height="${rowH}" data-tip="${esc(l + ": " + fmt(values[i]))}"/>`;
   }).join("");
   return `<svg viewBox="0 0 ${W} ${H}">${rows}</svg>`;
 }
-function yAxis(max, padL, padT, bottom) {
+function yAxis(max, padL, padT, bottom, W) {
   let out = "";
   for (let i = 0; i <= 4; i++) {
     const v = (max * i) / 4, y = bottom - ((bottom - padT) * i) / 4;
-    out += `<line class="gridline" x1="${padL}" y1="${y}" x2="600" y2="${y}"/><text class="axislbl" x="${padL - 6}" y="${y + 3}" text-anchor="end">${shortNum(v)}</text>`;
+    out += `<line class="gridline" x1="${padL}" y1="${y}" x2="${W}" y2="${y}"/><text class="axislbl" x="${padL - 6}" y="${y + 3}" text-anchor="end">${shortNum(v)}</text>`;
   }
   return out;
 }
