@@ -794,7 +794,7 @@ function renderGenres() {
   const a = ensureAgg();
   const gMs = {}, gPlays = {};
   for (const r of a.artists) for (const g of (r.genres || [])) { gMs[g] = (gMs[g] || 0) + r.ms; gPlays[g] = (gPlays[g] || 0) + r.plays; }
-  const top = Object.keys(gMs).sort((x, y) => gMs[y] - gMs[x]).slice(0, 40);
+  const top = Object.keys(gMs).sort((x, y) => gMs[y] - gMs[x]);
   if (!top.length) { el.innerHTML = `<div class="panel"><h3>Genres</h3><p class="muted">No genre data for this range.</p></div>`; return; }
   el.innerHTML = `<div class="panel"><h3>Top genres</h3>
     <div class="hint">Hours listened in range, summed across artists tagged with each genre (via Last.fm)</div>
@@ -898,12 +898,12 @@ function lineChart(labels, values, opts = {}) {
   return `<svg viewBox="0 0 ${W} ${H}">${yAxis(max, padL, padT, H - padB, W)}<polygon class="linearea" points="${area}"/><polyline class="linepath" points="${pts}"/>${dots}${bands}${xl}</svg>`;
 }
 function hbarChart(labels, values, fmt) {
-  const rowH = 26, padL = 150, W = 600, H = labels.length * rowH + 10, max = Math.max(1, ...values);
+  const rowH = 22, padL = 130, W = 600, H = labels.length * rowH + 10, max = Math.max(1, ...values);
   const rows = labels.map((l, i) => {
-    const w = ((W - padL - 60) * values[i]) / max, y = i * rowH + 6;
-    return `<text class="axislbl" x="${padL - 8}" y="${y + 13}" text-anchor="end" style="font-size:11px">${esc(l)}</text>
-      <rect class="bar2" x="${padL}" y="${y}" width="${w}" height="${rowH - 8}" rx="3"/>
-      <text class="axislbl" x="${padL + w + 6}" y="${y + 13}">${fmt(values[i])}</text>
+    const w = ((W - padL - 60) * values[i]) / max, y = i * rowH + 4;
+    return `<text class="axislbl" x="${padL - 6}" y="${y + 12}" text-anchor="end" style="font-size:9px">${esc(l)}</text>
+      <rect class="bar2" x="${padL}" y="${y}" width="${w}" height="${rowH - 6}" rx="3"/>
+      <text class="axislbl" x="${padL + w + 5}" y="${y + 12}" style="font-size:9px">${fmt(values[i])}</text>
       <rect class="hoverband" x="0" y="${i * rowH}" width="${W}" height="${rowH}" data-tl="${esc(l)}" data-tv="${esc(fmt(values[i]))}"/>`;
   }).join("");
   return `<svg viewBox="0 0 ${W} ${H}">${rows}</svg>`;
