@@ -1,15 +1,16 @@
 """
-genres.py — Fetch genres from Last.fm and output data/genres.json.
+genres.py — Fetch artist genres from Last.fm and output data/genres.json.
 
-This is completely separate from data.json — genres are never merged into the
-main data file. The browser loads genres.json in the background after the page
-renders, so page load speed is unaffected.
+Completely separate from data.json — genres are never merged into the main
+data file. The browser loads genres.json in the background after the page renders.
+
+Output format:  { "artist_name": ["tag1", "tag2", ...], ... }
 
 Needs a free Last.fm API key in config.json:  { "lastfm_api_key": "..." }
 Get one at https://www.last.fm/api/account/create
 
 Run:  python genres.py
-Re-running is incremental — already-fetched artists are skipped (cache file).
+Re-running is incremental — already-fetched entries are skipped (cache file).
 """
 
 import json
@@ -63,13 +64,13 @@ def filter_tags(names):
     return out
 
 
-def lastfm_top_tags(artist, key):
-    params = urllib.parse.urlencode({
-        "method": "artist.gettoptags", "artist": artist,
-        "api_key": key, "format": "json", "autocorrect": "1",
-    })
+def lastfm_fetch(params, key):
+    params["api_key"] = key
+    params["format"] = "json"
+    params["autocorrect"] = "1"
+    qs = urllib.parse.urlencode(params)
     req = urllib.request.Request(
-        LASTFM_API + "?" + params,
+        LASTFM_API + "?" + qs,
         headers={"User-Agent": "spotify-stats/1.0"},
     )
     while True:
@@ -89,6 +90,10 @@ def lastfm_top_tags(artist, key):
     return filter_tags(names)
 
 
+def save_cache(cache):
+    json.dump(cache, open(CACHE_PATH, "w", encoding="utf-8"), ensure_ascii=False)
+
+
 def main():
     cfg = json.load(open(CONFIG_PATH, encoding="utf-8")) if os.path.exists(CONFIG_PATH) else {}
     key = cfg.get("lastfm_api_key")
@@ -99,30 +104,38 @@ def main():
         )
 
     data = json.load(open(DATA_PATH, encoding="utf-8"))
-    cache = json.load(open(CACHE_PATH, encoding="utf-8")) if os.path.exists(CACHE_PATH) else {}
+
+    # Load cache — migrate old nested format to flat
+    cache = {}
+    if os.path.exists(CACHE_PATH):
+        raw = json.load(open(CACHE_PATH, encoding="utf-8"))
+        if "artists" in raw and isinstance(raw["artists"], dict):
+            cache = raw["artists"]
+        else:
+            cache = {k: v for k, v in raw.items() if isinstance(v, list)}
 
     artists = sorted(data["artists"], key=lambda a: -a.get("plays", 0))
     todo = [a["name"] for a in artists if a["name"] not in cache]
-    print(f"Artists: {len(artists):,} total, {len(todo):,} to fetch from Last.fm")
+    print(f"Artists: {len(artists):,} total, {len(todo):,} to fetch")
 
     for i, name in enumerate(todo):
-        cache[name] = lastfm_top_tags(name, key)
+        cache[name] = lastfm_fetch({"method": "artist.gettoptags", "artist": name}, key)
         time.sleep(0.2)
         if (i + 1) % 50 == 0:
-            print(f"    {i + 1:,}/{len(todo):,}")
-            json.dump(cache, open(CACHE_PATH, "w", encoding="utf-8"), ensure_ascii=False)
-    json.dump(cache, open(CACHE_PATH, "w", encoding="utf-8"), ensure_ascii=False)
+            print(f"    artists {i + 1:,}/{len(todo):,}")
+            save_cache(cache)
+    if todo:
+        save_cache(cache)
 
-    # Output genres.json: { artistName: [tags] } — only artists with tags
-    genres = {name: tags for name, tags in cache.items() if tags}
+    # Output genres.json — flat {artist: [tags]} with only non-empty entries
+    out = {name: tags for name, tags in cache.items() if tags}
     with open(GENRES_PATH, "w", encoding="utf-8") as fh:
-        json.dump(genres, fh, ensure_ascii=False, separators=(",", ":"))
+        json.dump(out, fh, ensure_ascii=False, separators=(",", ":"))
 
-    with_genres = sum(1 for a in artists if cache.get(a["name"]))
-    distinct = len({g for tags in genres.values() for g in tags})
+    a_with = sum(1 for a in artists if cache.get(a["name"]))
     size_kb = os.path.getsize(GENRES_PATH) / 1024
-    print(f"Done. {with_genres:,}/{len(artists):,} artists have genres "
-          f"({distinct:,} distinct). Output: {GENRES_PATH} ({size_kb:.0f} KB)")
+    print(f"Done. Artists with genres: {a_with:,}/{len(artists):,}")
+    print(f"      Output: {GENRES_PATH} ({size_kb:.0f} KB)")
 
 
 if __name__ == "__main__":

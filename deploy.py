@@ -21,6 +21,7 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 WEB = os.path.join(HERE, "web")
 DOCS = os.path.join(HERE, "docs")
+DATA_DIR = os.path.join(HERE, "data")
 
 META = '<meta name="build" content="pages">'
 
@@ -55,6 +56,12 @@ def main():
         else:
             shutil.copy2(src, dst)
         copied.append(name)
+
+    # Bundle genres.json if available (so Pages loads genres instantly)
+    genres_src = os.path.join(DATA_DIR, "genres.json")
+    if os.path.exists(genres_src):
+        shutil.copy2(genres_src, os.path.join(DOCS, "genres.json"))
+        copied.append("genres.json")
 
     # A .nojekyll file stops GitHub Pages from running Jekyll on the folder.
     open(os.path.join(DOCS, ".nojekyll"), "w").close()

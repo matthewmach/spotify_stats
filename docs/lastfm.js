@@ -5,6 +5,7 @@ const LASTFM_API_KEY = "4d13b240413a42e5d7e71417370d6ee7";
 const LASTFM_API = "https://ws.audioscrobbler.com/2.0/";
 const LASTFM_MAX_TAGS = 5;
 const LASTFM_MIN_COUNT = 10;
+const LASTFM_CONCURRENCY = 5;
 
 const LASTFM_BLOCKLIST = new Set([
   "seen live", "favorites", "favourites", "favorite", "favourite",
@@ -34,7 +35,7 @@ function lastfmFilterTags(tags) {
   return out;
 }
 
-async function lastfmTopTags(artist) {
+async function lastfmArtistTags(artist) {
   const params = new URLSearchParams({
     method: "artist.gettoptags", artist, api_key: LASTFM_API_KEY,
     format: "json", autocorrect: "1",
@@ -43,7 +44,24 @@ async function lastfmTopTags(artist) {
     const r = await fetch(LASTFM_API + "?" + params);
     if (!r.ok) return [];
     const data = await r.json();
-    const tags = (data.toptags || {}).tag || [];
-    return lastfmFilterTags(tags);
+    return lastfmFilterTags((data.toptags || {}).tag || []);
   } catch { return []; }
+}
+
+async function lastfmPool(items, fn, concurrency, onBatch) {
+  let done = 0;
+  const total = items.length;
+  let i = 0;
+  async function worker() {
+    while (i < total) {
+      const idx = i++;
+      await fn(items[idx]);
+      done++;
+      if (done % (concurrency * 4) === 0 && onBatch) onBatch(done, total);
+    }
+  }
+  const workers = [];
+  for (let w = 0; w < Math.min(concurrency, total); w++) workers.push(worker());
+  await Promise.all(workers);
+  if (onBatch) onBatch(done, total);
 }

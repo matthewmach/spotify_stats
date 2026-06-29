@@ -750,7 +750,7 @@ function renderTable(tab) {
 }
 
 /* ---------- genres (Last.fm, loaded separately in background) ---------- */
-let GENRES = null;  // { artistName: [tags] } — populated after background load
+let GENRES = null;  // { artist_name: [tags], ... }
 let GENRES_LOADED = false;
 
 function genreProgress(text, pct, done) {
@@ -761,60 +761,62 @@ function genreProgress(text, pct, done) {
   bar.hidden = false; txt.textContent = text; fill.style.width = Math.max(2, pct) + "%";
 }
 
+function genreFor(artist) {
+  if (!GENRES) return [];
+  return GENRES[artist] || [];
+}
+
 async function loadGenresBackground() {
-  // Try local genres.json first (produced by genres.py), then IDB cache
-  if (!BUILD_PAGES) {
-    try {
-      genreProgress("Loading genres…", 50);
-      const r = await fetch("../data/genres.json", { cache: "no-store" });
-      if (r.ok) {
-        GENRES = await r.json();
-        GENRES_LOADED = true;
-        applyGenres();
-        genreProgress(`Genres loaded — ${Object.keys(GENRES).toLocaleString()} artists ✓`, 100, true);
-        return;
-      }
-    } catch {}
-  }
+  // Try genres.json first (local: ../data/genres.json, Pages: ./genres.json)
+  const genreUrl = BUILD_PAGES ? "genres.json" : "../data/genres.json";
   try {
-    const cached = await idbGet("genres");
-    if (cached) {
-      GENRES = cached;
+    genreProgress("Loading genres…", 50);
+    const r = await fetch(genreUrl, { cache: "no-store" });
+    if (r.ok) {
+      GENRES = await r.json();
+      if (GENRES.artists) GENRES = GENRES.artists;
       GENRES_LOADED = true;
       applyGenres();
       genreProgress(`Genres loaded — ${Object.keys(GENRES).length.toLocaleString()} artists ✓`, 100, true);
       return;
     }
   } catch {}
-  // No local file and no cache — fetch from Last.fm API one by one
-  if (typeof lastfmTopTags === "function") {
-    GENRES = {};
-    const artists = DATA.artists.slice().sort((a, b) => (b.plays || 0) - (a.plays || 0));
-    const total = artists.length;
-    let fetched = 0;
-    genreProgress(`Fetching genres from Last.fm… 0 / ${total.toLocaleString()}`, 0);
-    for (const a of artists) {
-      const tags = await lastfmTopTags(a.name);
-      if (tags.length) GENRES[a.name] = tags;
-      fetched++;
-      if (fetched % 20 === 0) {
-        genreProgress(`Fetching genres from Last.fm… ${fetched.toLocaleString()} / ${total.toLocaleString()}`, (fetched / total) * 100);
-        applyGenres();
-      }
-      await new Promise((r) => setTimeout(r, 200));
+  try {
+    const cached = await idbGet("genres");
+    if (cached) {
+      GENRES = cached;
+      if (GENRES.artists) GENRES = GENRES.artists;
+      GENRES_LOADED = true;
+      applyGenres();
+      genreProgress(`Genres loaded — ${Object.keys(GENRES).length.toLocaleString()} artists ✓`, 100, true);
+      return;
     }
-    GENRES_LOADED = true;
+  } catch {}
+  // No local file and no cache — fetch from Last.fm API
+  if (typeof lastfmArtistTags !== "function") return;
+  GENRES = {};
+
+  const artists = DATA.artists.slice().sort((a, b) => (b.plays || 0) - (a.plays || 0));
+  genreProgress(`Artists 0 / ${artists.length.toLocaleString()}`, 0);
+  await lastfmPool(artists, async (a) => {
+    const tags = await lastfmArtistTags(a.name);
+    if (tags.length) GENRES[a.name] = tags;
+  }, LASTFM_CONCURRENCY, (done, total) => {
+    genreProgress(`Artists ${done.toLocaleString()} / ${total.toLocaleString()}`, (done / total) * 100);
     applyGenres();
-    idbSet("genres", GENRES).catch(() => {});
-    genreProgress(`Genres loaded — ${Object.keys(GENRES).length.toLocaleString()} artists ✓`, 100, true);
-  }
+  });
+
+  GENRES_LOADED = true;
+  applyGenres();
+  idbSet("genres", GENRES).catch(() => {});
+  genreProgress(`Genres loaded — ${Object.keys(GENRES).length.toLocaleString()} artists ✓`, 100, true);
 }
 
 function applyGenres() {
   if (!GENRES || !DATA) return;
-  for (const a of DATA.artists) a.genres = GENRES[a.name] || a.genres || [];
-  for (const al of DATA.albums) al.genres = GENRES[al.artist] || al.genres || [];
-  for (const t of DATA.tracks) { const g = GENRES[t.artist]; if (g) t.genres = g; }
+  for (const a of DATA.artists) a.genres = genreFor(a.name);
+  for (const al of DATA.albums) al.genres = genreFor(al.artist);
+  for (const t of DATA.tracks) t.genres = genreFor(t.artist);
   AGG = null; AGG_KEY = "";
   if (state.tab === "genres") renderGenres();
 }
@@ -830,12 +832,25 @@ function renderGenres() {
   }
   const a = ensureAgg();
   const gMs = {}, gPlays = {};
-  for (const r of a.artists) for (const g of (r.genres || [])) { gMs[g] = (gMs[g] || 0) + r.ms; gPlays[g] = (gPlays[g] || 0) + r.plays; }
+  for (const r of a.tracks) for (const g of (r.genres || [])) { gMs[g] = (gMs[g] || 0) + r.ms; gPlays[g] = (gPlays[g] || 0) + r.plays; }
   const top = Object.keys(gMs).sort((x, y) => gMs[y] - gMs[x]);
   if (!top.length) { el.innerHTML = `<div class="panel"><h3>Genres</h3><p class="muted">No genre data for this range.</p></div>`; return; }
-  el.innerHTML = `<div class="panel"><h3>Top genres</h3>
-    <div class="hint">Hours listened in range, summed across artists tagged with each genre (via Last.fm)</div>
+  const exportBtn = GENRES ? `<button class="chip" id="exportGenres">⬇ Export genres.json</button>` : "";
+  el.innerHTML = `<div class="panel"><div class="panelhead"><h3>Top genres</h3>${exportBtn}</div>
+    <div class="hint">Hours listened in range, artist genres via Last.fm</div>
     ${hbarChart(top, top.map((g) => gMs[g] / MS_H), (v) => fmtInt(v) + "h")}</div>`;
+  const btn = document.getElementById("exportGenres");
+  if (btn) btn.addEventListener("click", exportGenresJson);
+}
+
+function exportGenresJson() {
+  if (!GENRES) return;
+  const blob = new Blob([JSON.stringify(GENRES)], { type: "application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "genres.json";
+  a.click();
+  URL.revokeObjectURL(a.href);
 }
 
 /* ---------- drawer ---------- */
@@ -872,8 +887,7 @@ function openDrawer(tab, pos) {
   if (tab === "artists") related = relatedList("Top tracks (in range)", a.tracks.filter((t) => t.ai === r.idx).sort((x, y) => y.plays - x.plays).slice(0, 8));
   else if (tab === "albums") related = relatedList("Tracks (in range)", a.tracks.filter((t) => t.bi === r.idx).sort((x, y) => y.plays - x.plays).slice(0, 12));
 
-  const artistName = tab === "artists" ? r.name : r.artist;
-  const genreTags = (GENRES && GENRES[artistName]) || r.genres || [];
+  const genreTags = genreFor(tab === "artists" ? r.name : r.artist);
   const genres = genreTags.length
     ? `<h4>Genres</h4><div>${genreTags.map((g) => `<span class="tag">${esc(g)}</span>`).join("")}</div>` : "";
 

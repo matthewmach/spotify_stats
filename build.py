@@ -19,7 +19,7 @@ OUT_DIR = os.path.join(HERE, "data")
 
 HISTORY_DIR = os.environ.get(
     "SPOTIFY_HISTORY_DIR",
-    r"G:\Documents\Music\my_spotify_data\Spotify Extended Streaming History",
+    r"G:\Documents\Music\my_spotify_data\2026\Spotify Extended Streaming History",
 )
 
 STREAM_MS = 30_000  # a play counts as a "stream" at >= 30s (Spotify's threshold)
