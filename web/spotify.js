@@ -1,6 +1,6 @@
 /* spotify.js — optional in-browser enrichment via Spotify's PKCE OAuth flow
-   (no client secret, safe for a static site). Lets a signed-in user pull genres
-   + cover art for the data already loaded, mirroring enrich.py.
+   (no client secret, safe for a static site). Lets a signed-in user pull cover
+   art + popularity for the data already loaded. Genres come from Last.fm.
 
    The Client ID is public (not a secret). The Spotify app must list this page's
    URL as a Redirect URI, and (while the app is in development mode) the user's
@@ -139,13 +139,11 @@ async function spotifyEnrich(data, onProgress) {
     }
     for (const a of data.artists) {
       const info = artistInfo.get(nameToArtist[a.name]);
-      if (info) { a.genres = info.genres; a.img = info.img; a.popularity = info.popularity; a.followers = info.followers; }
+      if (info) { a.img = info.img; a.popularity = info.popularity; a.followers = info.followers; }
     }
     for (const al of data.albums) {
       const k = al.artist + SEP + al.name;
       if (albumArt[k]) al.img = albumArt[k];
-      const info = artistInfo.get(nameToArtist[al.artist]);
-      if (info && info.genres.length) al.genres = info.genres;
     }
   }
 

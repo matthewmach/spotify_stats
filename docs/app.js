@@ -58,7 +58,7 @@ function updateBadge() {
   const b = document.getElementById("modeBadge");
   let label, cls, tip;
   if (BUILD_PAGES) { label = "Pages"; cls = "badge-pages"; tip = "Hosted build — your files are read in your browser, nothing is uploaded."; }
-  else if (DATA_SOURCE === "local") { label = "Local"; cls = "badge-local"; tip = "Local build — loaded from data/data.json (genres & art available)."; }
+  else if (DATA_SOURCE === "local") { label = "Local"; cls = "badge-local"; tip = "Local build — loaded from data/data.json (cover art available)."; }
   else { label = "Browser"; cls = "badge-browser"; tip = "Loaded from files you picked in this browser."; }
   b.textContent = label; b.className = "badge " + cls; b.title = tip; b.hidden = false;
 }
@@ -238,8 +238,17 @@ function wireOnce() {
   // spotify connect / enrich
   document.getElementById("connectSpotify").addEventListener("click", connectSpotify);
 
-  // change-files + uploader
+  // change-files + clear cache + uploader
   document.getElementById("changeFiles").addEventListener("click", () => showUploader());
+  document.getElementById("clearData").addEventListener("click", async () => {
+    try {
+      const db = await idbOpen();
+      const tx = db.transaction("kv", "readwrite");
+      tx.objectStore("kv").clear();
+    } catch {}
+    sessionStorage.clear();
+    location.reload();
+  });
   const input = document.getElementById("fileInput"), dz = document.getElementById("dropzone");
   input.addEventListener("change", () => handleFiles([...input.files]));
   ["dragenter", "dragover"].forEach((ev) => dz.addEventListener(ev, (e) => { e.preventDefault(); dz.classList.add("drag"); }));
@@ -259,6 +268,7 @@ function onDataReady(data) {
   document.getElementById("uploader").hidden = true;
   document.getElementById("filterbar").hidden = false;
   document.getElementById("changeFiles").hidden = false;
+  document.getElementById("clearData").hidden = !BUILD_PAGES;
   const fromI = document.getElementById("fromDate"), toI = document.getElementById("toDate");
   fromI.min = toI.min = DAY_DATE[0]; fromI.max = toI.max = DAY_DATE[N_DAYS - 1];
   updateBadge();
@@ -291,7 +301,7 @@ async function runEnrichment() {
   bar.hidden = false; txt.textContent = "Connecting to Spotify…"; fill.style.width = "2%";
   try {
     await spotifyEnrich(DATA, (td, tt, ad, at, doRender) => {
-      txt.textContent = `Genres ${ad.toLocaleString()} / ${at.toLocaleString()} · cover art ${td.toLocaleString()} / ${tt.toLocaleString()}`;
+      txt.textContent = `Cover art ${td.toLocaleString()} / ${tt.toLocaleString()} · artists ${ad.toLocaleString()} / ${at.toLocaleString()}`;
       fill.style.width = Math.max(2, (td / tt) * 100) + "%";
       if (doRender) { AGG = null; AGG_KEY = ""; render(); }   // progressive: show art/genres as they arrive
     });
@@ -299,7 +309,7 @@ async function runEnrichment() {
     AGG = null; AGG_KEY = "";                   // final rebuild
     render();
     updateConnectButton();
-    txt.textContent = "Done — genres & cover art added ✓"; fill.style.width = "100%";
+    txt.textContent = "Done — cover art added ✓"; fill.style.width = "100%";
     setTimeout(() => { bar.hidden = true; }, 1800);
   } catch (e) {
     enrichError(e.message);
@@ -743,33 +753,60 @@ function renderTable(tab) {
 let GENRES = null;  // { artistName: [tags] } — populated after background load
 let GENRES_LOADED = false;
 
+function genreProgress(text, pct, done) {
+  const bar = document.getElementById("genrebar");
+  const txt = document.getElementById("genreText");
+  const fill = document.getElementById("genreBar");
+  if (done) { txt.textContent = text; fill.style.width = "100%"; setTimeout(() => { bar.hidden = true; }, 1800); return; }
+  bar.hidden = false; txt.textContent = text; fill.style.width = Math.max(2, pct) + "%";
+}
+
 async function loadGenresBackground() {
   // Try local genres.json first (produced by genres.py), then IDB cache
   if (!BUILD_PAGES) {
     try {
+      genreProgress("Loading genres…", 50);
       const r = await fetch("../data/genres.json", { cache: "no-store" });
-      if (r.ok) { GENRES = await r.json(); GENRES_LOADED = true; applyGenres(); return; }
+      if (r.ok) {
+        GENRES = await r.json();
+        GENRES_LOADED = true;
+        applyGenres();
+        genreProgress(`Genres loaded — ${Object.keys(GENRES).toLocaleString()} artists ✓`, 100, true);
+        return;
+      }
     } catch {}
   }
   try {
     const cached = await idbGet("genres");
-    if (cached) { GENRES = cached; GENRES_LOADED = true; applyGenres(); return; }
+    if (cached) {
+      GENRES = cached;
+      GENRES_LOADED = true;
+      applyGenres();
+      genreProgress(`Genres loaded — ${Object.keys(GENRES).length.toLocaleString()} artists ✓`, 100, true);
+      return;
+    }
   } catch {}
-  // No local file and no cache — fetch from Last.fm API in small batches
+  // No local file and no cache — fetch from Last.fm API one by one
   if (typeof lastfmTopTags === "function") {
     GENRES = {};
     const artists = DATA.artists.slice().sort((a, b) => (b.plays || 0) - (a.plays || 0));
+    const total = artists.length;
     let fetched = 0;
+    genreProgress(`Fetching genres from Last.fm… 0 / ${total.toLocaleString()}`, 0);
     for (const a of artists) {
       const tags = await lastfmTopTags(a.name);
       if (tags.length) GENRES[a.name] = tags;
       fetched++;
-      if (fetched % 20 === 0) applyGenres();
+      if (fetched % 20 === 0) {
+        genreProgress(`Fetching genres from Last.fm… ${fetched.toLocaleString()} / ${total.toLocaleString()}`, (fetched / total) * 100);
+        applyGenres();
+      }
       await new Promise((r) => setTimeout(r, 200));
     }
     GENRES_LOADED = true;
     applyGenres();
     idbSet("genres", GENRES).catch(() => {});
+    genreProgress(`Genres loaded — ${Object.keys(GENRES).length.toLocaleString()} artists ✓`, 100, true);
   }
 }
 

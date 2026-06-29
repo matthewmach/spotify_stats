@@ -23,8 +23,9 @@
       <button data-tab="genres">Genres</button>
     </nav>
     <div class="controls">
-      <button id="connectSpotify" class="chip chip-accent" hidden title="Sign in to add genres &amp; cover art">♪ Add genres &amp; art</button>
+      <button id="connectSpotify" class="chip chip-accent" hidden title="Sign in to add cover art &amp; popularity">♪ Add cover art</button>
       <button id="changeFiles" class="chip" hidden title="Load a different Spotify history export">⟳ Re-upload</button>
+      <button id="clearData" class="chip" hidden title="Clear cached data (IndexedDB)">✕ Clear cache</button>
     </div>
   </header>
 
@@ -32,6 +33,12 @@
     <div class="spinner sm"></div>
     <div class="enrich-text" id="enrichText">Connecting to Spotify…</div>
     <div class="progress slim"><div class="progress-bar" id="enrichBar"></div></div>
+  </div>
+
+  <div class="enrichbar" id="genrebar" hidden>
+    <div class="spinner sm"></div>
+    <div class="enrich-text" id="genreText">Loading genres from Last.fm…</div>
+    <div class="progress slim"><div class="progress-bar" id="genreBar"></div></div>
   </div>
 
   <div class="filterbar" id="filterbar" hidden>
@@ -87,8 +94,8 @@
             <li>Request <b>Extended streaming history</b> (arrives by email, can take a few days).</li>
             <li>Unzip it and select every <code>Streaming_History_Audio_*.json</code> file here.</li>
           </ol>
-          <p class="muted">Genres and cover art aren't in the export — they only appear if you run the
-            optional local <code>enrich.py</code> step (see the project README).</p>
+          <p class="muted">Cover art isn't in the export — it only appears if you run the optional
+            local <code>enrich.py</code> step (see the project README). Genres load automatically from Last.fm.</p>
         </details>
       </div>
     </section>
