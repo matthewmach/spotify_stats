@@ -26,7 +26,7 @@ META = '<meta name="build" content="pages">'
 
 # Local assets to cache-bust so browsers (and the Pages CDN) always fetch the
 # latest after a deploy — otherwise a stale app.js can show old behaviour.
-ASSETS = ("styles.css", "shared-build.js", "spotify.js", "app.js")
+ASSETS = ("styles.css", "shared-build.js", "spotify.js", "lastfm.js", "app.js")
 
 
 def cache_bust(html, version):

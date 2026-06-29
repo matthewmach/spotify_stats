@@ -267,6 +267,7 @@ function onDataReady(data) {
   setTab(state.tab || "overview");
   updateConnectButton();
   if (pendingEnrich) { pendingEnrich = false; runEnrichment(); }
+  setTimeout(loadGenresBackground, 0);
 }
 
 /* ---------- Spotify enrichment (in-browser, via spotify.js) ---------- */
@@ -428,24 +429,12 @@ function buildYearChips() {
   });
 }
 function buildPresetMenu() {
-  const btn = document.getElementById("presetMenuBtn");
   const menu = document.getElementById("presetMenu");
   const presets = [
     ["Last 30 days", 30], ["Last 90 days", 90], ["Last 6 months", 182],
     ["Last 12 months", 365], ["All time", null],
   ];
   menu.innerHTML = presets.map((p, i) => `<button data-n="${p[1] == null ? "" : p[1]}">${p[0]}</button>`).join("");
-  btn.addEventListener("click", () => { menu.hidden = !menu.hidden; });
-  document.addEventListener("click", (e) => {
-    if (!e.target.closest(".rangepick")) menu.hidden = true;
-  });
-  menu.addEventListener("click", (e) => {
-    const b = e.target.closest("button"); if (!b) return;
-    menu.hidden = true;
-    if (b.dataset.n === "") return setWindow(0, N_DAYS - 1, "all");
-    const n = +b.dataset.n, end = N_DAYS - 1;
-    setWindow(Math.max(0, end - n + 1), end, null);
-  });
 }
 
 function setWindow(start, end, presetLabel) {
@@ -750,13 +739,56 @@ function renderTable(tab) {
   }
 }
 
-/* ---------- genres ---------- */
+/* ---------- genres (Last.fm, loaded separately in background) ---------- */
+let GENRES = null;  // { artistName: [tags] } — populated after background load
+let GENRES_LOADED = false;
+
+async function loadGenresBackground() {
+  // Try local genres.json first (produced by genres.py), then IDB cache
+  if (!BUILD_PAGES) {
+    try {
+      const r = await fetch("../data/genres.json", { cache: "no-store" });
+      if (r.ok) { GENRES = await r.json(); GENRES_LOADED = true; applyGenres(); return; }
+    } catch {}
+  }
+  try {
+    const cached = await idbGet("genres");
+    if (cached) { GENRES = cached; GENRES_LOADED = true; applyGenres(); return; }
+  } catch {}
+  // No local file and no cache — fetch from Last.fm API in small batches
+  if (typeof lastfmTopTags === "function") {
+    GENRES = {};
+    const artists = DATA.artists.slice().sort((a, b) => (b.plays || 0) - (a.plays || 0));
+    let fetched = 0;
+    for (const a of artists) {
+      const tags = await lastfmTopTags(a.name);
+      if (tags.length) GENRES[a.name] = tags;
+      fetched++;
+      if (fetched % 20 === 0) applyGenres();
+      await new Promise((r) => setTimeout(r, 200));
+    }
+    GENRES_LOADED = true;
+    applyGenres();
+    idbSet("genres", GENRES).catch(() => {});
+  }
+}
+
+function applyGenres() {
+  if (!GENRES || !DATA) return;
+  for (const a of DATA.artists) a.genres = GENRES[a.name] || a.genres || [];
+  for (const al of DATA.albums) al.genres = GENRES[al.artist] || al.genres || [];
+  for (const t of DATA.tracks) { const g = GENRES[t.artist]; if (g) t.genres = g; }
+  AGG = null; AGG_KEY = "";
+  if (state.tab === "genres") renderGenres();
+}
+
 function renderGenres() {
   const el = document.getElementById("view-genres");
-  if (!DATA.enriched) {
+  if (!GENRES_LOADED) {
     el.innerHTML = `<div class="panel"><h3>Genres</h3>
-      <p class="muted">No genre data yet — genres come from the Spotify API.</p>
-      <p class="muted">Add credentials to <code>config.json</code>, run <code>python enrich.py</code>, then refresh.</p></div>`;
+      <p class="muted">Loading genres in the background…</p>
+      <p class="muted">Genres come from Last.fm. Run <code>python genres.py</code> locally for instant loading,
+      or wait a moment for them to load from the API.</p></div>`;
     return;
   }
   const a = ensureAgg();
@@ -765,7 +797,7 @@ function renderGenres() {
   const top = Object.keys(gMs).sort((x, y) => gMs[y] - gMs[x]).slice(0, 40);
   if (!top.length) { el.innerHTML = `<div class="panel"><h3>Genres</h3><p class="muted">No genre data for this range.</p></div>`; return; }
   el.innerHTML = `<div class="panel"><h3>Top genres</h3>
-    <div class="hint">Hours listened in range, summed across artists tagged with each genre</div>
+    <div class="hint">Hours listened in range, summed across artists tagged with each genre (via Last.fm)</div>
     ${hbarChart(top, top.map((g) => gMs[g] / MS_H), (v) => fmtInt(v) + "h")}</div>`;
 }
 
@@ -785,6 +817,11 @@ function openDrawer(tab, pos) {
     ["Skipped", `${fmtInt(r.skipped)} (${fmtPct(r.skipped / r.plays)})`],
     ["Distinct days", fmtInt(r.days)], ["Shuffle starts", fmtPct(r.shuffle / r.plays)],
   ];
+  if (tab === "artists") {
+    const uniqueSongs = new Set();
+    for (let ti = 0; ti < DATA.tracks.length; ti++) if (AI[ti] === r.idx) uniqueSongs.add(DATA.tracks[ti].name);
+    stats.push(["Unique songs", fmtInt(uniqueSongs.size)]);
+  }
   if (tab === "songs" && r.popularity != null) stats.push(["Spotify popularity", r.popularity + "/100"]);
   if (r.followers != null) stats.push(["Followers", fmtInt(r.followers)]);
 
@@ -798,8 +835,10 @@ function openDrawer(tab, pos) {
   if (tab === "artists") related = relatedList("Top tracks (in range)", a.tracks.filter((t) => t.ai === r.idx).sort((x, y) => y.plays - x.plays).slice(0, 8));
   else if (tab === "albums") related = relatedList("Tracks (in range)", a.tracks.filter((t) => t.bi === r.idx).sort((x, y) => y.plays - x.plays).slice(0, 12));
 
-  const genres = (r.genres && r.genres.length)
-    ? `<h4>Genres</h4><div>${r.genres.map((g) => `<span class="tag">${esc(g)}</span>`).join("")}</div>` : "";
+  const artistName = tab === "artists" ? r.name : r.artist;
+  const genreTags = (GENRES && GENRES[artistName]) || r.genres || [];
+  const genres = genreTags.length
+    ? `<h4>Genres</h4><div>${genreTags.map((g) => `<span class="tag">${esc(g)}</span>`).join("")}</div>` : "";
 
   document.getElementById("drawerPanel").innerHTML = `
     <button class="closeBtn" data-close>✕</button>
