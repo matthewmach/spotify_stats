@@ -846,7 +846,7 @@ async function loadGenresBackground() {
     genreProgress(`Fetching ${missing.length.toLocaleString()} artists…`, 0);
     await lastfmPool(missing, async (a) => {
       const tags = await lastfmArtistTags(a.name);
-      if (tags.length) GENRES[a.name] = tags;
+      GENRES[a.name] = tags;
     }, LASTFM_CONCURRENCY, (done, total) => {
       genreProgress(`Artists ${done.toLocaleString()} / ${total.toLocaleString()}`, (done / total) * 100);
       applyGenres();

@@ -127,8 +127,8 @@ def main():
     if todo:
         save_cache(cache)
 
-    # Output genres.json — flat {artist: [tags]} with only non-empty entries
-    out = {name: tags for name, tags in cache.items() if tags}
+    # Output genres.json — flat {artist: [tags]}, including empty to prevent re-fetching
+    out = dict(cache)
     with open(GENRES_PATH, "w", encoding="utf-8") as fh:
         json.dump(out, fh, ensure_ascii=False, separators=(",", ":"))
 
