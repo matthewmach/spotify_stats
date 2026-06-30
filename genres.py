@@ -40,6 +40,7 @@ TAG_BLOCKLIST = {
     "female vocalists", "male vocalists", "female vocalist", "male vocalist",
     "female fronted", "male fronted",
     "under 2000 listeners", "banger", "bangers", "vibe", "vibes",
+    "singer-songwriter", "singer/songwriter",
 }
 
 
