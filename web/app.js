@@ -767,7 +767,8 @@ function genreFor(artist) {
 }
 
 async function loadGenresBackground() {
-  // Try genres.json first (local: ../data/genres.json, Pages: ./genres.json)
+  // Load seed data from genres.json or IDB cache
+  GENRES = {};
   const genreUrl = BUILD_PAGES ? "genres.json" : "../data/genres.json";
   try {
     genreProgress("Loading genres…", 50);
@@ -775,40 +776,34 @@ async function loadGenresBackground() {
     if (r.ok) {
       GENRES = await r.json();
       if (GENRES.artists) GENRES = GENRES.artists;
-      GENRES_LOADED = true;
-      applyGenres();
-      genreProgress(`Genres loaded — ${Object.keys(GENRES).length.toLocaleString()} artists ✓`, 100, true);
-      return;
     }
   } catch {}
-  try {
-    const cached = await idbGet("genres");
-    if (cached) {
-      GENRES = cached;
-      if (GENRES.artists) GENRES = GENRES.artists;
-      GENRES_LOADED = true;
-      applyGenres();
-      genreProgress(`Genres loaded — ${Object.keys(GENRES).length.toLocaleString()} artists ✓`, 100, true);
-      return;
-    }
-  } catch {}
-  // No local file and no cache — fetch from Last.fm API
-  if (typeof lastfmArtistTags !== "function") return;
-  GENRES = {};
+  if (!Object.keys(GENRES).length) {
+    try {
+      const cached = await idbGet("genres");
+      if (cached) { GENRES = cached; if (GENRES.artists) GENRES = GENRES.artists; }
+    } catch {}
+  }
 
-  const artists = DATA.artists.slice().sort((a, b) => (b.plays || 0) - (a.plays || 0));
-  genreProgress(`Artists 0 / ${artists.length.toLocaleString()}`, 0);
-  await lastfmPool(artists, async (a) => {
-    const tags = await lastfmArtistTags(a.name);
-    if (tags.length) GENRES[a.name] = tags;
-  }, LASTFM_CONCURRENCY, (done, total) => {
-    genreProgress(`Artists ${done.toLocaleString()} / ${total.toLocaleString()}`, (done / total) * 100);
-    applyGenres();
-  });
+  // Apply whatever we have so far
+  if (Object.keys(GENRES).length) { applyGenres(); }
+
+  // Fetch missing artists from Last.fm
+  const missing = DATA.artists.filter((a) => !(a.name in GENRES)).sort((a, b) => (b.plays || 0) - (a.plays || 0));
+  if (missing.length && typeof lastfmArtistTags === "function") {
+    genreProgress(`Fetching ${missing.length.toLocaleString()} artists…`, 0);
+    await lastfmPool(missing, async (a) => {
+      const tags = await lastfmArtistTags(a.name);
+      if (tags.length) GENRES[a.name] = tags;
+    }, LASTFM_CONCURRENCY, (done, total) => {
+      genreProgress(`Artists ${done.toLocaleString()} / ${total.toLocaleString()}`, (done / total) * 100);
+      applyGenres();
+    });
+    idbSet("genres", GENRES).catch(() => {});
+  }
 
   GENRES_LOADED = true;
   applyGenres();
-  idbSet("genres", GENRES).catch(() => {});
   genreProgress(`Genres loaded — ${Object.keys(GENRES).length.toLocaleString()} artists ✓`, 100, true);
 }
 
