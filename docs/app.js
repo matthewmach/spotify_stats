@@ -483,7 +483,6 @@ function aggregate(start, end) {
   const streamMs = DATA.streamMs;
   let totPlays = 0, totMs = 0, totStr = 0, totSkip = 0, totDone = 0, activeDays = 0, lastDay = -1;
   const monthly = {}, byHour = new Array(24).fill(0), byWeekday = new Array(7).fill(0);
-  const dayPlays = {}, dayMs = {};
 
   for (let i = 0; i < NP; i++) {
     const d = P.d[i];
@@ -501,8 +500,6 @@ function aggregate(start, end) {
     (monthly[mo] || (monthly[mo] = { plays: 0, ms: 0 })).plays++;
     monthly[mo].ms += ms;
     byHour[P.h[i]]++; byWeekday[DAY_WEEKDAY[d]]++;
-    dayPlays[d] = (dayPlays[d] || 0) + 1;
-    dayMs[d] = (dayMs[d] || 0) + ms;
   }
 
   // distinct tracks per artist/album within window
@@ -546,7 +543,7 @@ function aggregate(start, end) {
       plays: totPlays, ms: totMs, streams: totStr, skipped: totSkip, completed: totDone,
       artists: artists.length, albums: albums.length, tracks: tracks.length, days: activeDays,
     },
-    artists, albums, tracks, monthly, byHour, byWeekday, discovery, dayPlays, dayMs,
+    artists, albums, tracks, monthly, byHour, byWeekday, discovery,
   };
 }
 function accum(S, i, d, ms, isStr, dn, sk, sf) {
@@ -610,21 +607,31 @@ function renderOverview() {
   const clockHours = new Array(24).fill(0);
   for (let h = 0; h < 24; h++) clockHours[((h + state.tzOffset) % 24 + 24) % 24] += a.byHour[h];
 
-  // --- Highlights ---
+  // --- Highlights (timezone-aware day computation) ---
   const highlights = [];
+  const dayPlays = {}, dayMs = {};
+  const tz = state.tzOffset;
+  for (let i = 0; i < NP; i++) {
+    const d = P.d[i];
+    if (d < state.window.start || d > state.window.end) continue;
+    const localH = (P.h[i] + tz + 24) % 24;
+    const localD = P.h[i] + tz < 0 ? d - 1 : P.h[i] + tz >= 24 ? d + 1 : d;
+    dayPlays[localD] = (dayPlays[localD] || 0) + 1;
+    dayMs[localD] = (dayMs[localD] || 0) + P.ms[i];
+  }
 
   // Biggest listening day (by hours)
   let peakDay = -1, peakDayMs = 0;
-  for (const [d, ms] of Object.entries(a.dayMs)) { if (ms > peakDayMs) { peakDayMs = ms; peakDay = +d; } }
-  if (peakDay >= 0) highlights.push(["Biggest day", Math.floor(peakDayMs / MS_H) + "h " + Math.round((peakDayMs % MS_H) / 60000) + "m", dDate(peakDay) + " · " + fmtInt(a.dayPlays[peakDay]) + " plays"]);
+  for (const [d, ms] of Object.entries(dayMs)) { if (ms > peakDayMs) { peakDayMs = ms; peakDay = +d; } }
+  if (peakDay >= 0) highlights.push(["Biggest day", Math.floor(peakDayMs / MS_H) + "h " + Math.round((peakDayMs % MS_H) / 60000) + "m", dDate(peakDay) + " · " + fmtInt(dayPlays[peakDay]) + " plays"]);
 
   // Most plays in a day
   let busiestDay = -1, busiestPlays = 0;
-  for (const [d, p] of Object.entries(a.dayPlays)) { if (p > busiestPlays) { busiestPlays = p; busiestDay = +d; } }
+  for (const [d, p] of Object.entries(dayPlays)) { if (p > busiestPlays) { busiestPlays = p; busiestDay = +d; } }
   if (busiestDay >= 0 && busiestDay !== peakDay) highlights.push(["Most plays in a day", fmtInt(busiestPlays), dDate(busiestDay)]);
 
   // Longest streak
-  const activeDaysSorted = Object.keys(a.dayPlays).map(Number).sort((a, b) => a - b);
+  const activeDaysSorted = Object.keys(dayPlays).map(Number).sort((a, b) => a - b);
   let streak = 1, bestStreak = 1, streakStart = activeDaysSorted[0], bestStart = activeDaysSorted[0], bestEnd = activeDaysSorted[0];
   for (let i = 1; i < activeDaysSorted.length; i++) {
     if (activeDaysSorted[i] === activeDaysSorted[i - 1] + 1) {
@@ -639,7 +646,8 @@ function renderOverview() {
   for (let i = 0; i < NP; i++) {
     const d = P.d[i];
     if (d < state.window.start || d > state.window.end) continue;
-    const k = d + ":" + P.t[i];
+    const localD = P.h[i] + tz < 0 ? d - 1 : P.h[i] + tz >= 24 ? d + 1 : d;
+    const k = localD + ":" + P.t[i];
     dayTrack[k] = (dayTrack[k] || 0) + 1;
   }
   let repKey = "", repCount = 0;
@@ -652,7 +660,7 @@ function renderOverview() {
 
   // Quietest active day (fewest plays on a day you listened)
   let quietDay = -1, quietPlays = Infinity;
-  for (const [d, p] of Object.entries(a.dayPlays)) { if (p < quietPlays) { quietPlays = p; quietDay = +d; } }
+  for (const [d, p] of Object.entries(dayPlays)) { if (p < quietPlays) { quietPlays = p; quietDay = +d; } }
   if (quietDay >= 0 && quietPlays < busiestPlays) highlights.push(["Quietest day", fmtInt(quietPlays) + " plays", dDate(quietDay)]);
 
   const hlHtml = highlights.length ? `<div class="grid-full">
